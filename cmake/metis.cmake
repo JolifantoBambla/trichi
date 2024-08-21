@@ -29,14 +29,6 @@ add_compile_definitions(
 )
 
 include("${METIS_SOURCE_DIR}/conf/gkbuild.cmake")
-#install(FILES "${METIS_SOURCE_DIR}/include/metis.h" TYPE INCLUDE)
-
-
-#execute_process(COMMAND bash -c "make -C ${metis_SOURCE_DIR} config")
-
-
-#set(GKLIB_PATH ${gklib_SOURCE_DIR})
-#add_subdirectory(${metis_SOURCE_DIR})
 
 # Build libmetis.
 add_library(libmetis)
