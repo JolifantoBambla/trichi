@@ -25,6 +25,12 @@ size_t intersection_size(const T1& s1, const T2& s2) {
   set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
   return c.count;
 }
+template<typename T1, typename T2>
+size_t union_size(const T1& s1, const T2& s2) {
+  Counter c{};
+  set_union(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
+  return c.count;
+}
 
 namespace pmn {
     // todo: figure out API, move impl to private files
