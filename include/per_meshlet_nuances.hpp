@@ -7,10 +7,9 @@
 
 #include <iostream> // todo: remove
 #include <set>
+#include <unordered_map>
 #include <vector>
 
-#include "geometrycentral/surface/manifold_surface_mesh.h"
-#include "geometrycentral/surface/surface_mesh.h"
 #include "meshoptimizer.h"
 #include "metis.h"
 
@@ -23,7 +22,7 @@ namespace pmn {
     void create_dag(const std::vector<uint32_t> &indices, const std::vector<float> &vertices, size_t vertex_stride) {
         // todo: should be params
         const size_t max_vertices = 255;
-        const size_t max_triangles = 64;
+        const size_t max_triangles = 128;
         const float cone_weight = 0.5f;
 
         // todo: optimize mesh before generating meshlets
@@ -89,30 +88,41 @@ namespace pmn {
         std::vector<std::set<uint64_t>> boundaries{};
         boundaries.reserve(meshlets.size());
         for (const auto& meshlet : meshlets) {
-          std::vector<std::vector<size_t>> polygons{};
-          polygons.reserve(meshlet.triangle_count);
+          // find edges
+          std::unordered_map<uint64_t, int> edges{};
           for (size_t i = 0; i < meshlet.triangle_count; ++i) {
-             polygons.push_back({
-                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 0],
-                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 1],
-                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 2],
-             });
-          }
-
-          std::set<uint64_t> boundary{};
-          for (const auto& e : geometrycentral::surface::SurfaceMesh(polygons).edges()) {
-            if (e.isBoundary()) {
-              printf("first %i second %i\n", e.firstVertex().getIndex(), e.secondVertex().getIndex());
-              auto start = static_cast<uint64_t>(meshlet_vertices[meshlet.vertex_offset + e.firstVertex().getIndex()]);
-              auto end = static_cast<uint64_t>(meshlet_vertices[meshlet.vertex_offset + e.secondVertex().getIndex()]);
-              if (start > end) {
-                std::swap(start, end);
-              }
-              boundary.insert((start << 32) | end);
+            const uint64_t a = meshlet_triangles[meshlet.triangle_offset + i * 3 + 0];
+            const uint64_t b = meshlet_triangles[meshlet.triangle_offset + i * 3 + 1];
+            const uint64_t c = meshlet_triangles[meshlet.triangle_offset + i * 3 + 2];
+            const uint64_t e1 = a < b ? (a << 32) | b : (b << 32) | a;
+            const uint64_t e2 = a < c ? (a << 32) | c : (c << 32) | a;
+            const uint64_t e3 = b < c ? (b << 32) | c : (c << 32) | b;
+            if (!edges.contains(e1)) {
+              edges[e1] = 1;
+            } else {
+              ++edges[e1];
+            }
+            if (!edges.contains(e2)) {
+              edges[e2] = 1;
+            } else {
+              ++edges[e2];
+            }
+            if (!edges.contains(e3)) {
+              edges[e3] = 1;
+            } else {
+              ++edges[e3];
             }
           }
-          boundaries.push_back(boundary);
-          printf("meshlet done\n");
+
+          // find boundary = find edges that only appear once
+          std::set<uint64_t> boundary;
+          for (const auto& [k, v] : edges) {
+            if (v == 1) {
+              boundary.insert(k);
+            }
+          }
+
+          printf("boundary size: %i vs %i edges\n", int(boundary.size()), int(edges.size()));
         }
 
         // todo:
