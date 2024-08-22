@@ -13,6 +13,19 @@
 #include "meshoptimizer.h"
 #include "metis.h"
 
+// https://stackoverflow.com/questions/32640327/how-to-compute-the-size-of-an-intersection-of-two-stl-sets-in-c
+struct Counter {
+  struct value_type { template<typename T> value_type(const T&) { } };
+  void push_back(const value_type&) { ++count; }
+  size_t count = 0;
+};
+template<typename T1, typename T2>
+size_t intersection_size(const T1& s1, const T2& s2) {
+  Counter c{};
+  set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
+  return c.count;
+}
+
 namespace pmn {
     // todo: figure out API, move impl to private files
     void generateNextLod() {
@@ -115,7 +128,8 @@ namespace pmn {
           }
 
           // find boundary = find edges that only appear once
-          std::set<uint64_t> boundary;
+          boundaries.emplace_back();
+          auto& boundary = boundaries.back();
           for (const auto& [k, v] : edges) {
             if (v == 1) {
               boundary.insert(k);
@@ -124,6 +138,8 @@ namespace pmn {
 
           printf("boundary size: %i vs %i edges\n", int(boundary.size()), int(edges.size()));
         }
+
+        
 
         // todo:
         // compute boundary for each cluster
