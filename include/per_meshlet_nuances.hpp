@@ -6,8 +6,11 @@
 #define METIS_PER_MESHLET_NUANCES_HPP
 
 #include <iostream> // todo: remove
+#include <set>
 #include <vector>
 
+#include "geometrycentral/surface/manifold_surface_mesh.h"
+#include "geometrycentral/surface/surface_mesh.h"
 #include "meshoptimizer.h"
 #include "metis.h"
 
@@ -19,8 +22,8 @@ namespace pmn {
 
     void create_dag(const std::vector<uint32_t> &indices, const std::vector<float> &vertices, size_t vertex_stride) {
         // todo: should be params
-        const size_t max_vertices = 64;
-        const size_t max_triangles = 128;
+        const size_t max_vertices = 255;
+        const size_t max_triangles = 64;
         const float cone_weight = 0.5f;
 
         // todo: optimize mesh before generating meshlets
@@ -58,10 +61,7 @@ namespace pmn {
         double avg_triangles = 0;
         size_t not_full = 0;
 
-        for (size_t i = 0; i < meshlets.size(); ++i)
-        {
-            const meshopt_Meshlet& m = meshlets[i];
-
+        for (auto m : meshlets) {
             avg_vertices += m.vertex_count;
             avg_triangles += m.triangle_count;
             not_full += m.vertex_count < max_vertices;
@@ -84,6 +84,35 @@ namespace pmn {
                                                           vertices.data(),
                                                           vertices.size(),
                                                           vertex_stride));
+        }
+
+        std::vector<std::set<uint64_t>> boundaries{};
+        boundaries.reserve(meshlets.size());
+        for (const auto& meshlet : meshlets) {
+          std::vector<std::vector<size_t>> polygons{};
+          polygons.reserve(meshlet.triangle_count);
+          for (size_t i = 0; i < meshlet.triangle_count; ++i) {
+             polygons.push_back({
+                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 0],
+                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 1],
+                 meshlet_triangles[meshlet.triangle_offset + i * 3 + 2],
+             });
+          }
+
+          std::set<uint64_t> boundary{};
+          for (const auto& e : geometrycentral::surface::SurfaceMesh(polygons).edges()) {
+            if (e.isBoundary()) {
+              printf("first %i second %i\n", e.firstVertex().getIndex(), e.secondVertex().getIndex());
+              auto start = static_cast<uint64_t>(meshlet_vertices[meshlet.vertex_offset + e.firstVertex().getIndex()]);
+              auto end = static_cast<uint64_t>(meshlet_vertices[meshlet.vertex_offset + e.secondVertex().getIndex()]);
+              if (start > end) {
+                std::swap(start, end);
+              }
+              boundary.insert((start << 32) | end);
+            }
+          }
+          boundaries.push_back(boundary);
+          printf("meshlet done\n");
         }
 
         // todo:
