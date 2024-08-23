@@ -2,9 +2,10 @@
 // Created by lukas on 21.08.24.
 //
 
-#ifndef METIS_PER_MESHLET_NUANCES_HPP
-#define METIS_PER_MESHLET_NUANCES_HPP
+#ifndef PER_MESHLET_NUANCES_HPP
+#define PER_MESHLET_NUANCES_HPP
 
+#include <algorithm>
 #include <iostream> // todo: remove
 #include <set>
 #include <unordered_map>
@@ -22,13 +23,13 @@ struct Counter {
 template<typename T1, typename T2>
 size_t intersection_size(const T1& s1, const T2& s2) {
   Counter c{};
-  set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
+  std::set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
   return c.count;
 }
 template<typename T1, typename T2>
 size_t union_size(const T1& s1, const T2& s2) {
   Counter c{};
-  set_union(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
+  std::set_union(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
   return c.count;
 }
 
@@ -104,7 +105,8 @@ namespace pmn {
                                                           vertex_stride));
         }
 
-        std::vector<std::set<uint64_t>> boundaries{};
+        // compute boundary for each cluster
+        std::vector<std::vector<uint64_t>> boundaries{};
         boundaries.reserve(meshlets.size());
         for (const auto& meshlet : meshlets) {
           // find edges
@@ -138,18 +140,49 @@ namespace pmn {
           auto& boundary = boundaries.back();
           for (const auto& [k, v] : edges) {
             if (v == 1) {
-              boundary.insert(k);
+              boundary.push_back(k);
             }
           }
+          std::sort(boundary.begin(), boundary.end());
 
           printf("boundary size: %i vs %i edges\n", int(boundary.size()), int(edges.size()));
         }
 
-        
+        // compute neighborhood for each meshlet - store shared boundaries for computing group boundary later
+        // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
+        std::vector<std::unordered_map<size_t, std::vector<uint64_t>>> neighborhoods{};
+        neighborhoods.reserve(meshlets.size());
+        std::vector<int> xadj = {0};
+        xadj.reserve(meshlets.size() + 1);
+        std::vector<int> adjacency{};
+        std::vector<int> adjwght{};
+        for (size_t i = 0; i < boundaries.size(); ++i) {
+            const auto& a = boundaries[i];
+            neighborhoods.emplace_back();
+            auto& neighborhood = neighborhoods.back();
+            xadj.push_back(xadj[i - 1]);
+            for (size_t j = 0; j < i; ++j) {
+                if (neighborhoods[j].contains(i)) {
+                    ++xadj[i];
+                    adjacency.push_back(static_cast<int>(j));
+                    adjwght.push_back(static_cast<int>(neighborhoods[j][i].size()));
+                }
+            }
+            for (size_t j = i + 1; j < boundaries.size(); ++j) {
+                const auto& b = boundaries[j];
+                std::vector<uint64_t> shared_boundary{};
+                std::set_union(a.cbegin(), a.cend(), b.cbegin(), b.cend(), std::back_inserter(shared_boundary));
+                if (!shared_boundary.empty()) {
+                    ++xadj[i];
+                    adjacency.push_back(static_cast<int>(j));
+                    adjwght.push_back(static_cast<int>(shared_boundary.size()));
+                    neighborhood[j] = std::move(shared_boundary);
+                }
+            }
+        }
 
         // todo:
-        // compute boundary for each cluster
-        // group up to 4 clusters based on number of shared boundary edges
+        // group up to n clusters based on number of shared boundary edges
         // merge clusters in group (deduplicate)
         // simplify to 50% of tris in group
         // split groups into 2 clusters of n triangles each
@@ -157,4 +190,4 @@ namespace pmn {
     }
 }
 
-#endif //METIS_PER_MESHLET_NUANCES_HPP
+#endif //PER_MESHLET_NUANCES_HPP
