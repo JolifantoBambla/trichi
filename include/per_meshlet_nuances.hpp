@@ -42,25 +42,25 @@ namespace pmn {
 
     [[nodiscard]] consteval std::array<idx_t, METIS_NOPTIONS> createPartitionOptions() {
       std::array<idx_t, METIS_NOPTIONS> options{};
-      options.fill(0);
-      options[METIS_OPTION_OBJTYPE] = METIS_PTYPE_KWAY;
+      METIS_SetDefaultOptions(options.data());
+      options[METIS_OPTION_OBJTYPE] = METIS_PTYPE_KWAY; // partitioning method. no idea why this can be set if the method is in the function name? also, what's the difference between the two methods?
       options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_CUT;
-      // todo: set opts
-      options[METIS_OPTION_CTYPE] = 0;
-      options[METIS_OPTION_IPTYPE] = 0;
-      options[METIS_OPTION_RTYPE] = 0;
-      options[METIS_OPTION_NO2HOP] = 0;
-      options[METIS_OPTION_NCUTS] = 0;
-      options[METIS_OPTION_NITER] = 0;
-      options[METIS_OPTION_UFACTOR] = 0;
-      options[METIS_OPTION_MINCONN] = 0;
-      options[METIS_OPTION_CONTIG] = 0;
-      options[METIS_OPTION_SEED] = 0;
-      options[METIS_OPTION_NUMBERING] = 0;
+      // todo: check out possible options
+      //options[METIS_OPTION_CTYPE] = 0; // matching scheme: RM: random matching, SHEM: sorted heavy edge matching (is that what I want or no?) 
+      //options[METIS_OPTION_IPTYPE] = 0; // algorithm for initial partitioning
+      //options[METIS_OPTION_RTYPE] = 0;  // algorithm for refinement
+      //options[METIS_OPTION_NO2HOP] = 0; // 1 -> coarsening will not perform 2-hop matchings, whatever that is
+      options[METIS_OPTION_NCUTS] = 1; // number of partitionings that will be computed, the final one is the one with best result
+      options[METIS_OPTION_NITER] = 10; // number of refinement steps at each coarsening step
+      //options[METIS_OPTION_UFACTOR] = 0; // default for rb = 1, kway = 30
+      //options[METIS_OPTION_MINCONN] = 0; // 1 -> explicitly minimize connectivity between groups
+      options[METIS_OPTION_CONTIG] = 1; // 1 -> force contiguous partitions (I think that means that nodes in groups are connected? maybe not?)
+      //options[METIS_OPTION_SEED] = 0; // seed for rng
+      options[METIS_OPTION_NUMBERING] = 0; // 0 -> result is 0-indexed
 #ifndef NDEBUG
-      options[METIS_OPTION_DBGLVL] = METIS_DBG_INFO;
+      options[METIS_OPTION_DBGLVL] |= METIS_DBG_INFO;
 #endif
-      options[METIS_OPTION_DBGLVL] = 0;
+      // todo: add ways to set debug level options for other stuff, e.g., timing
       return options;
     }
 
