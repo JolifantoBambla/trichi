@@ -46,10 +46,10 @@ namespace pmn {
       options[METIS_OPTION_OBJTYPE] = METIS_PTYPE_KWAY; // partitioning method. no idea why this can be set if the method is in the function name? also, what's the difference between the two methods?
       options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_CUT;
       // todo: check out possible options
-      //options[METIS_OPTION_CTYPE] = 0; // matching scheme: RM: random matching, SHEM: sorted heavy edge matching (is that what I want or no?) 
-      //options[METIS_OPTION_IPTYPE] = 0; // algorithm for initial partitioning
+      options[METIS_OPTION_CTYPE] = METIS_CTYPE_SHEM; // matching scheme: RM: random matching, SHEM: sorted heavy edge matching (is that what I want or no?) 
+      options[METIS_OPTION_IPTYPE] = METIS_IPTYPE_GROW; // grow: greedy; algorithm for initial partitioning
       //options[METIS_OPTION_RTYPE] = 0;  // algorithm for refinement
-      //options[METIS_OPTION_NO2HOP] = 0; // 1 -> coarsening will not perform 2-hop matchings, whatever that is
+      options[METIS_OPTION_NO2HOP] = 1; // 1 -> coarsening will not perform 2-hop matchings - I think that 2-hops are irrelevant for meshlet grouping, right?
       options[METIS_OPTION_NCUTS] = 1; // number of partitionings that will be computed, the final one is the one with best result
       options[METIS_OPTION_NITER] = 10; // number of refinement steps at each coarsening step
       //options[METIS_OPTION_UFACTOR] = 0; // default for rb = 1, kway = 30
