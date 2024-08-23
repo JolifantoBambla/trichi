@@ -6,6 +6,7 @@
 #define PER_MESHLET_NUANCES_HPP
 
 #include <algorithm>
+#include <array>
 #include <iostream> // todo: remove
 #include <set>
 #include <unordered_map>
@@ -37,6 +38,30 @@ namespace pmn {
     // todo: figure out API, move impl to private files
     void generateNextLod() {
 
+    }
+
+    [[nodiscard]] consteval std::array<idx_t, METIS_NOPTIONS> createPartitionOptions() {
+      std::array<idx_t, METIS_NOPTIONS> options{};
+      options.fill(0);
+      options[METIS_OPTION_OBJTYPE] = METIS_PTYPE_KWAY;
+      options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_CUT;
+      // todo: set opts
+      options[METIS_OPTION_CTYPE] = 0;
+      options[METIS_OPTION_IPTYPE] = 0;
+      options[METIS_OPTION_RTYPE] = 0;
+      options[METIS_OPTION_NO2HOP] = 0;
+      options[METIS_OPTION_NCUTS] = 0;
+      options[METIS_OPTION_NITER] = 0;
+      options[METIS_OPTION_UFACTOR] = 0;
+      options[METIS_OPTION_MINCONN] = 0;
+      options[METIS_OPTION_CONTIG] = 0;
+      options[METIS_OPTION_SEED] = 0;
+      options[METIS_OPTION_NUMBERING] = 0;
+#ifndef NDEBUG
+      options[METIS_OPTION_DBGLVL] = METIS_DBG_INFO;
+#endif
+      options[METIS_OPTION_DBGLVL] = 0;
+      return options;
     }
 
     void create_dag(const std::vector<uint32_t> &indices, const std::vector<float> &vertices, size_t vertex_stride) {
@@ -152,10 +177,10 @@ namespace pmn {
         // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
         std::vector<std::unordered_map<size_t, std::vector<uint64_t>>> neighborhoods{};
         neighborhoods.reserve(meshlets.size());
-        std::vector<int> xadj = {0};
+        std::vector<idx_t> xadj = {0};
         xadj.reserve(meshlets.size() + 1);
-        std::vector<int> adjacency{};
-        std::vector<int> adjwght{};
+        std::vector<idx_t> adjacency{};
+        std::vector<idx_t> adjwght{};
         for (size_t i = 0; i < boundaries.size(); ++i) {
             const auto& a = boundaries[i];
             neighborhoods.emplace_back();
@@ -179,6 +204,42 @@ namespace pmn {
                     neighborhood[j] = std::move(shared_boundary);
                 }
             }
+        }
+
+        // todo: number of vertices, number of constraints, number of parts should be pointers, I think
+
+
+
+        auto numVertices = static_cast<idx_t>(meshlets.size());
+        idx_t numConstraints = 1; // 1 is the minimum allowed value
+        idx_t numParts = numVertices / 4;
+        idx_t edgeCut = 0;
+        std::vector<idx_t> partition = std::vector<idx_t>(numVertices, 0);
+        std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions();
+
+        const auto partitionResult = METIS_PartGraphKway(
+            &numVertices,         // number of vertices
+            &numConstraints,      // number of constraints (=1 -> edge weights? or just 1 because that's the minimum?)
+            xadj.data(),          // adjacency information: exclusive scan of vertex degrees
+            adjacency.data(),     // adjacency information: list of edges per node
+            nullptr,              // vertex weights
+            nullptr,              // number of vertices for computing the total communication volume -> not used, we use min edge cut
+            adjwght.data(),       // edge weights
+            &numParts,            // number of groups -> we want to half the number of tris by grouping 4 clusters that are then simplified and then split in half
+            nullptr,              // weight for each partition -> nullptr means we want an equally distributed partition
+            nullptr,              // the allowed load imbalance tolerance -> we use the default
+            options.data(),       // options
+            &edgeCut,             // the edge cut (or total communication volume)
+            partition.data());    // the partition vector of the graph (0- or 1-indexing depends on value of METIS_OPTION_NUMBERING)
+
+        if (partitionResult != METIS_OK) {
+          if (partitionResult == METIS_ERROR_INPUT) {
+             throw std::runtime_error("could not partition graph - input error");
+          } else if (partitionResult == METIS_ERROR_MEMORY) {
+            throw std::runtime_error("could not partition graph - not enough memory");
+          } else {
+            throw std::runtime_error("could not partition graph - unknown error");
+          }
         }
 
         // todo:
