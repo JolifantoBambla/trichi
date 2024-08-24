@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace pmn {
+
 void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride);
 }
 
