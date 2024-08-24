@@ -13,7 +13,7 @@ CPMAddPackage("gh:assimp/assimp#v5.4.2")
 
 # lib
 add_library(per_meshlet_nuances
-        src/main.cpp)
+        src/per_meshlet_nuances.cpp)
 target_include_directories(per_meshlet_nuances PUBLIC
         include)
 target_link_libraries(per_meshlet_nuances
@@ -23,7 +23,8 @@ target_link_libraries(per_meshlet_nuances
 )
 
 # example
-add_executable(example src/main.cpp)
+add_executable(example
+        src/main.cpp)
 target_link_libraries(example
         per_meshlet_nuances
         assimp)
