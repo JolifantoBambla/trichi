@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <iostream>  // todo: remove
 #include <set>
 #include <unordered_map>
@@ -127,6 +128,9 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   const float cone_weight = 0.5f;
   const size_t max_num_clusters_per_group = 4;
   const float simplify_target_index_count_threshold = 0.2f;
+  const size_t max_lod_count = 25;
+  const float min_target_error = 1e-2f;
+  const float max_target_error = 1.0f;
 
   float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
@@ -248,7 +252,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
     // loop over vertices that have not been processed yet
     for (size_t j = i + 1; j < boundaries.size(); ++j) {
-      const auto shared_boundary_length = union_size(a, boundaries[j]);
+      const auto shared_boundary_length = intersection_size(a, boundaries[j]);
       if (shared_boundary_length > 0) {
         ++xadj[i + 1];
         adjacency.push_back(static_cast<idx_t>(j));
@@ -323,6 +327,26 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       "parse partition: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_parse_partition - start_parse_partition).count());
 
+  /*
+  for (const auto& group : groups) {
+    printf("\nnew group");
+    for (const auto i : group) {
+      printf("\n\tcluster %i:", int(i));
+      for (const auto j : group) {
+        if (i == j)
+          continue;
+        printf(" %i=%i", int(j), int(graph_edge_weights[i][j]));
+      }
+      printf("\n\tother :");
+      for (const auto [j, c] : graph_edge_weights[i]) {
+        printf(" %i=%i", int(j), int(c));
+      }
+    }
+  }
+   */
+
+  size_t num_new_meshlets = 0;
+  size_t num_not_simplified = 0;
   const auto start_process_groups = std::chrono::high_resolution_clock::now();
   for (const auto& group : groups) {
     std::vector<uint32_t> group_indices{};
@@ -346,8 +370,9 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     size_t target_index_count =
         (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) *
         2;  // we want to reduce ~50% of tris
-    float target_error =
-        1.0;  //1e-2f * simplify_scale; // range [0..1] todo: what should that be? probably should depend on lod?
+    const size_t lod = 1;
+    float lod_target_error_scale = static_cast<float>(lod) / static_cast<float>(max_lod_count);
+    float step_target_error = std::lerp(min_target_error, max_target_error, lod_target_error_scale) * simplify_scale; // range [0..1] todo: what should that be? probably should depend on lod?
     uint32_t simplification_options =
         meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
     float simplification_error = 0.0f;
@@ -360,10 +385,11 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         vertex_count,
         vertex_stride,
         target_index_count,
-        target_error,
+        step_target_error,
         simplification_options,
         &simplification_error));
 
+    /*
     printf(
         "simplified has %i indices (%i tris) vs %i (%i tris) before simplify (%i target tri count, %i target index "
         "count, %f target error)\n",
@@ -374,6 +400,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         int(target_index_count / 3),
         int(target_index_count),
         target_error);
+    */
 
     // todo: optimize group? since we don't use scan should be fine without?
 
@@ -395,7 +422,13 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         max_triangles,
         cone_weight));
 
-    printf("next lod has %i meshlets\n", int(group_meshlet.size()));
+    num_new_meshlets += group_meshlet.size();
+
+    if (group_meshlet.size() >= max_num_clusters_per_group) {
+      ++num_not_simplified;
+    }
+
+    //printf("next lod has %i meshlets\n", int(group_meshlet.size()));
 
     for (const auto& meshlet : group_meshlet) {
       meshopt_optimizeMeshlet(
@@ -410,11 +443,14 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       "process groups: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
 
+  printf("num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n", int(num_new_meshlets), int(meshlets.meshlets.size()), int(meshlets.meshlets.size()) / 2, int(num_not_simplified));
+
   // todo:
-  // group up to n clusters based on number of shared boundary edges
-  // simplify to 50% of tris in group
-  // split groups into 2 clusters of n triangles each
+  // insert into dag
+  // put new meshlets and meshlets that were not simplified back into pool
   // repeat
+
+  // parallelize, optimize, tune
 
   const auto end_time = std::chrono::high_resolution_clock::now();
   printf(
