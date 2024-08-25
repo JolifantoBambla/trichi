@@ -11,7 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>  // todo: remove
-#include <set>
+#include <span>
 #include <unordered_map>
 
 #include "per_meshlet_nuances.hpp"
@@ -48,24 +48,57 @@ size_t union_size(const T1& s1, const T2& s2) {
 // todo: I have a lot of embarrassingly parallel steps in here - std::async adds a lot of overhead for creating and destroying threads every time, so thread pool would be good. maybe use https://github.com/hosseinmoein/Leopard ?
 
 namespace pmn {
+struct MeshletId {
+  uint32_t index;
+  uint32_t level;
+
+  bool operator==(const MeshletId& other) const { return index == other.index && level == other.level; }
+};
+}  // namespace pmn
+
+template <>
+struct std::hash<pmn::MeshletId> {
+  std::size_t operator()(const pmn::MeshletId& id) const {
+    return std::hash<uint64_t>()(static_cast<uint64_t>(id.index) << 32) | id.level;
+  }
+};
+
+namespace pmn {
 // todo: figure out API, move impl to private files
 void generateNextLod() {}
+
 struct Meshlets {
   std::vector<meshopt_Meshlet> meshlets;
   std::vector<unsigned int> vertices;
   std::vector<unsigned char> triangles;
 };
 
-[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const meshopt_Meshlet& meshlet, const Meshlets& meshlets) {
+struct DagNode {
+  size_t children_offset;
+  size_t num_children;
+};
+
+struct Dag {
+  std::unordered_map<MeshletId, DagNode> nodes;
+  std::vector<MeshletId> meshlet_ids;
+  std::unordered_map<uint32_t, Meshlets> meshlets;
+};
+
+[[nodiscard]] uint64_t pack_sorted(uint64_t a, uint64_t b) {
+  return (std::min(a, b) << 32) | std::max(a, b);
+}
+
+[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Meshlets& meshlets, size_t meshlet_index) {
+  const meshopt_Meshlet& meshlet = meshlets.meshlets[meshlet_index];
   std::unordered_map<uint64_t, int> edges{};
   for (size_t i = 0; i < meshlet.triangle_count; ++i) {
     const size_t triangle_offset = meshlet.triangle_offset + i * 3;
     const uint64_t a = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 0]];
     const uint64_t b = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 1]];
     const uint64_t c = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 2]];
-    const uint64_t e1 = a < b ? (a << 32) | b : (b << 32) | a;
-    const uint64_t e2 = a < c ? (a << 32) | c : (c << 32) | a;
-    const uint64_t e3 = b < c ? (b << 32) | c : (c << 32) | b;
+    const uint64_t e1 = pack_sorted(a, b);
+    const uint64_t e2 = pack_sorted(a, c);
+    const uint64_t e3 = pack_sorted(b, c);
     if (!edges.contains(e1)) {
       edges[e1] = 1;
     } else {
@@ -103,8 +136,7 @@ struct Meshlets {
   options[METIS_OPTION_NITER] = 10;  // number of refinement steps at each coarsening step
   //options[METIS_OPTION_UFACTOR] = 0; // default for rb = 1, kway = 30
   //options[METIS_OPTION_MINCONN] = 0; // 1 -> explicitly minimize connectivity between groups
-  options[METIS_OPTION_CONTIG] =
-      idx_t(is_contiguous);  // 1 -> force contiguous partitions
+  options[METIS_OPTION_CONTIG] = idx_t(is_contiguous);  // 1 -> force contiguous partitions
   //options[METIS_OPTION_SEED] = 0; // seed for rng
   options[METIS_OPTION_NUMBERING] = 0;  // 0 -> result is 0-indexed
 #ifndef NDEBUG
@@ -114,34 +146,20 @@ struct Meshlets {
   return options;
 }
 
-void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
-  const auto start_time = std::chrono::high_resolution_clock::now();
-
-  if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
-    throw std::runtime_error("invalid vertex stride");
-  }
-  const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
-
-  // todo: should be params
-  const size_t max_vertices = 255;
-  const size_t max_triangles = 128;
-  const float cone_weight = 0.5f;
-  const size_t max_num_clusters_per_group = 4;
-  const float simplify_target_index_count_threshold = 0.2f;
-  const size_t max_lod_count = 25;
-  const float min_target_error = 1e-2f;
-  const float max_target_error = 1.0f;
-
-  float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
-
-  // todo: maybe optimize mesh before generating meshlets? since we don't use scan should be fine without?
-
+[[nodiscard]] Meshlets build_meshlets(
+    const std::vector<uint32_t>& indices,
+    const std::vector<float>& vertices,
+    size_t vertex_count,
+    size_t vertex_stride,
+    size_t max_vertices,
+    size_t max_triangles,
+    float cone_weight) {
   size_t max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_vertices, max_triangles);
   Meshlets meshlets = {
-    .meshlets = std::vector<meshopt_Meshlet>(max_meshlets),
-    .vertices = std::vector<unsigned int>(max_meshlets * max_vertices),
-    .triangles = std::vector<unsigned char>(max_meshlets * max_triangles * 3),
-};
+      .meshlets = std::vector<meshopt_Meshlet>(max_meshlets),
+      .vertices = std::vector<unsigned int>(max_meshlets * max_vertices),
+      .triangles = std::vector<unsigned char>(max_meshlets * max_triangles * 3),
+  };
 
   const auto start_build_meshlets = std::chrono::high_resolution_clock::now();
   meshlets.meshlets.resize(meshopt_buildMeshlets(
@@ -180,39 +198,26 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   // todo: clean meshlets: move triangles with one or less shared vertices to other meshlet
 
-  std::vector<meshopt_Bounds> bounds{};
-  bounds.reserve(meshlets.meshlets.size());
-  const auto start_meshlet_bounds = std::chrono::high_resolution_clock::now();
-  for (const auto& meshlet : meshlets.meshlets) {
-    bounds.push_back(meshopt_computeMeshletBounds(
-        &meshlets.vertices[meshlet.vertex_offset],
-        &meshlets.triangles[meshlet.triangle_offset],
-        meshlet.triangle_count,
-        vertices.data(),
-        vertex_count,
-        vertex_stride));
-  }
-  const auto end_meshlet_bounds = std::chrono::high_resolution_clock::now();
-  printf(
-      "meshlet bounds: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
+  return std::move(meshlets);
+}
 
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const Meshlets& meshlets) {
   // compute boundary for each cluster
-  std::vector<std::vector<uint64_t>> boundaries{};
-  boundaries.reserve(meshlets.meshlets.size());
+  std::vector<std::vector<uint64_t>> boundaries(meshlets.meshlets.size());
   const auto start_meshlet_boundary = std::chrono::high_resolution_clock::now();
-  for (const auto& meshlet : meshlets.meshlets) {
+  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
     // find edges
-    const auto edges = extract_cluster_edges(meshlet, meshlets);
+    const auto edges = extract_cluster_edges(meshlets, i);
 
     // find boundary = find edges that only appear once
-    boundaries.emplace_back();
-    auto& boundary = boundaries.back();
+    auto& boundary = boundaries[i];
     for (const auto& [edge_id, num_occurrences] : edges) {
       if (num_occurrences == 1) {
         boundary.push_back(edge_id);
       }
     }
+
+    // sort boundary for later use of set_union
     std::sort(boundary.begin(), boundary.end());
   }
   const auto end_meshlet_boundary = std::chrono::high_resolution_clock::now();
@@ -220,7 +225,19 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       "meshlet boundary: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_boundary - start_meshlet_boundary).count());
 
-  // compute neighborhood for each meshlet - store shared boundaries for computing group boundary later
+  return std::move(boundaries);
+}
+
+struct Graph {
+  std::vector<idx_t> xadj;
+  std::vector<idx_t> adjacency;
+  std::vector<idx_t> adjwght;
+  bool is_contiguous;
+};
+
+[[nodiscard]] Graph build_cluster_graph(const Meshlets& meshlets) {
+  const auto boundaries = extract_boundaries(meshlets);
+
   // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
   std::atomic<size_t> no_neighbors_count = 0;
   std::atomic<size_t> no_neighbors_count2 = 0;
@@ -233,7 +250,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   const auto start_build_meshlet_graph = std::chrono::high_resolution_clock::now();
   for (size_t i = 0; i < boundaries.size(); ++i) {
-    const auto& a = boundaries[i];
+    const auto& boundary = boundaries[i];
 
     graph_edge_weights.emplace_back();
     auto& node_edge_weights = graph_edge_weights.back();
@@ -252,7 +269,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
     // loop over vertices that have not been processed yet
     for (size_t j = i + 1; j < boundaries.size(); ++j) {
-      const auto shared_boundary_length = intersection_size(a, boundaries[j]);
+      const auto shared_boundary_length = intersection_size(boundary, boundaries[j]);
       if (shared_boundary_length > 0) {
         ++xadj[i + 1];
         adjacency.push_back(static_cast<idx_t>(j));
@@ -262,6 +279,95 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     }
     if ((xadj[i + 1] - xadj[i]) == 0) {
       ++no_neighbors_count;
+
+      printf("%i: no neighbors", int(i));
+
+      /*
+      const auto& m = meshlets.meshlets[i];
+      const auto edges = extract_cluster_edges(meshlets, i);
+
+      for (size_t j = 0; j < boundaries.size(); ++j) {
+        if (i == j)
+          continue;
+        const auto other_edges = extract_cluster_edges(meshlets, j);
+        for (const auto& [e, c] : edges) {
+          if (other_edges.contains(e)) {
+            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
+            const uint32_t v2 = static_cast<uint32_t>(e);
+            printf(
+                "\n\t%i has shared non-boundary edge (%u-%u (c: %i vs %i)) with %i",
+                int(i),
+                v1,
+                v2,
+                c,
+                other_edges.at(e),
+                int(j));
+          }
+        }
+      }
+
+      const auto vertices = std::span(meshlets.vertices.begin() + m.vertex_offset, m.vertex_count);
+      for (size_t j = 0; j < meshlets.meshlets.size(); ++j) {
+        if (i == j) {
+          continue;
+        }
+        const auto& other = meshlets.meshlets[j];
+        const auto other_verts = std::span(meshlets.vertices.begin() + other.vertex_offset, other.vertex_count);
+        std::vector<uint32_t> shared_vertices{};
+        for (const auto& v : vertices) {
+          if (std::find(other_verts.begin(), other_verts.end(), v) != other_verts.end()) {
+            shared_vertices.push_back(v);
+          }
+        }
+        if (!shared_vertices.empty()) {
+          printf("\n\t%i has %i shared vertices with %i: ", int(i), int(shared_vertices.size()), int(j));
+          for (const auto& v : shared_vertices) {
+            printf(" %u", v);
+          }
+          printf("\n\tboundary edges: ");
+          for (const auto& b : boundary) {
+            printf(" %u-%u", static_cast<uint32_t>(b >> 32), static_cast<uint32_t>(b));
+          }
+          printf("\n\tedges: ");
+          for (const auto& [e, c] : edges) {
+            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
+            const uint32_t v2 = static_cast<uint32_t>(e);
+            if (std::find(shared_vertices.begin(), shared_vertices.end(), v1) != shared_vertices.end() ||
+                std::find(shared_vertices.begin(), shared_vertices.end(), v2) != shared_vertices.end()) {
+              printf("\n\t\t");
+            }
+            printf(" %u-%u (%i)", static_cast<uint32_t>(e >> 32), static_cast<uint32_t>(e), int(c));
+          }
+          printf("\n\tother edges: ");
+          for (const auto& [e, c] : extract_cluster_edges(meshlets, j)) {
+            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
+            const uint32_t v2 = static_cast<uint32_t>(e);
+            if (std::find(shared_vertices.begin(), shared_vertices.end(), v1) != shared_vertices.end() ||
+                std::find(shared_vertices.begin(), shared_vertices.end(), v2) != shared_vertices.end()) {
+              printf("\n\t\t");
+            }
+            printf(" %u-%u (%i)", static_cast<uint32_t>(e >> 32), static_cast<uint32_t>(e), int(c));
+          }
+        }
+        for (const auto& v : shared_vertices) {
+          for (const auto b : boundary) {
+            const uint32_t v1 = b >> 32;
+            const uint32_t v2 = b;
+            if (v == v1 && v == v2) {
+              printf("\n\t\tshared vert is in boundary: %u", v);
+            }
+          }
+          for (const auto b : boundaries[j]) {
+            const uint32_t v1 = b >> 32;
+            const uint32_t v2 = b;
+            if (v == v1 && v == v2) {
+              printf("\n\t\tshared vert is in boundary of other: %u", v);
+            }
+          }
+        }
+      }
+       */
+      printf("\n");
     }
     if (graph_edge_weights[i].empty()) {
       ++no_neighbors_count2;
@@ -273,26 +379,51 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       std::chrono::duration_cast<std::chrono::milliseconds>(end_build_meshlet_graph - start_build_meshlet_graph)
           .count());
 
-  printf("%i of %i meshlets have no neighbors, %i have no neighborhood\n", int(no_neighbors_count), int(meshlets.meshlets.size()), int(no_neighbors_count2));
+  printf(
+      "%i of %i meshlets have no neighbors, %i have no neighborhood\n",
+      int(no_neighbors_count),
+      int(meshlets.meshlets.size()),
+      int(no_neighbors_count2));
 
-  // partition graph into groups of 4 clusters
-  // todo: mt-kahypar (https://github.com/kahypar/mt-kahypar) looks very promising for graph partitioning - no static lib though, so needs some work for wasm build
-  auto numVertices = static_cast<idx_t>(meshlets.meshlets.size());
+  return Graph{
+      .xadj = std::move(xadj),
+      .adjacency = std::move(adjacency),
+      .adjwght = std::move(adjwght),
+      .is_contiguous = no_neighbors_count == 0,
+  };
+}
+
+[[nodiscard]] std::vector<std::vector<size_t>> resolve_groups(const std::vector<idx_t>& partition, size_t num_groups) {
+  auto groups = std::vector<std::vector<size_t>>(num_groups);
+  const auto start_parse_partition = std::chrono::high_resolution_clock::now();
+  for (size_t i = 0; i < partition.size(); ++i) {
+    groups[partition[i]].push_back(i);
+  }
+  const auto end_parse_partition = std::chrono::high_resolution_clock::now();
+  printf(
+      "parse partition: took %ld ms\n",
+      std::chrono::duration_cast<std::chrono::milliseconds>(end_parse_partition - start_parse_partition).count());
+  return std::move(groups);
+}
+
+// todo: mt-kahypar (https://github.com/kahypar/mt-kahypar) looks very promising for graph partitioning - no static lib though, so needs some work for wasm build
+[[nodiscard]] std::vector<std::vector<size_t>> partition_graph(Graph graph, size_t max_clusters_per_group) {
+  auto numVertices = static_cast<idx_t>(graph.xadj.size() - 1);
   idx_t numConstraints = 1;  // 1 is the minimum allowed value
-  idx_t numParts = numVertices / static_cast<idx_t>(max_num_clusters_per_group);
+  idx_t numParts = numVertices / static_cast<idx_t>(max_clusters_per_group);
   idx_t edgeCut = 0;
   std::vector<idx_t> partition = std::vector<idx_t>(numVertices, 0);
-  std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions(no_neighbors_count == 0);
+  std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions(graph.is_contiguous);
 
   const auto start_partition_meshlet_graph = std::chrono::high_resolution_clock::now();
   const auto partitionResult = METIS_PartGraphKway(
-      &numVertices,      // number of vertices
-      &numConstraints,   // number of constraints (=1 -> edge weights? or just 1 because that's the minimum?)
-      xadj.data(),       // adjacency information: exclusive scan of vertex degrees
-      adjacency.data(),  // adjacency information: list of edges per node
-      nullptr,           // vertex weights
+      &numVertices,            // number of vertices
+      &numConstraints,         // number of constraints (=1 -> edge weights? or just 1 because that's the minimum?)
+      graph.xadj.data(),       // adjacency information: exclusive scan of vertex degrees
+      graph.adjacency.data(),  // adjacency information: list of edges per node
+      nullptr,                 // vertex weights
       nullptr,  // number of vertices for computing the total communication volume -> not used, we use min edge cut
-      adjwght.data(),  // edge weights
+      graph.adjwght.data(),  // edge weights
       &numParts,  // number of groups -> we want to half the number of tris by grouping 4 clusters that are then simplified and then split in half
       nullptr,    // weight for each partition -> nullptr means we want an equally distributed partition
       nullptr,    // the allowed load imbalance tolerance -> we use the default
@@ -316,80 +447,139 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     }
   }
 
-  // merge clusters in group, simplify to ~50% tris, split into meshlets of max 128 tris
-  auto groups = std::vector<std::vector<size_t>>(numParts);
-  const auto start_parse_partition = std::chrono::high_resolution_clock::now();
-  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
-    groups[partition[i]].push_back(i);
+  return resolve_groups(partition, numParts);
+}
+
+[[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
+    const Meshlets& meshlets,
+    size_t max_clusters_per_group = 4) {
+  return std::move(partition_graph(std::move(build_cluster_graph(meshlets)), max_clusters_per_group));
+}
+
+void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
+  const auto start_time = std::chrono::high_resolution_clock::now();
+
+  if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
+    throw std::runtime_error("invalid vertex stride");
   }
-  const auto end_parse_partition = std::chrono::high_resolution_clock::now();
-  printf(
-      "parse partition: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_parse_partition - start_parse_partition).count());
+  const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
 
   /*
-  for (const auto& group : groups) {
-    printf("\nnew group");
-    for (const auto i : group) {
-      printf("\n\tcluster %i:", int(i));
-      for (const auto j : group) {
-        if (i == j)
-          continue;
-        printf(" %i=%i", int(j), int(graph_edge_weights[i][j]));
-      }
-      printf("\n\tother :");
-      for (const auto [j, c] : graph_edge_weights[i]) {
-        printf(" %i=%i", int(j), int(c));
-      }
-    }
+  printf("export const mesh = {\n\tvertex: [");
+  for (const auto f : vertices) {
+    printf("%f,", f);
   }
+  printf("],\n\tindex: [");
+  for (const auto i : indices) {
+    printf("%u,", i);
+  }
+  printf("],\n};\n");
    */
 
-  size_t num_new_meshlets = 0;
-  size_t num_not_simplified = 0;
-  const auto start_process_groups = std::chrono::high_resolution_clock::now();
-  for (const auto& group : groups) {
-    std::vector<uint32_t> group_indices{};
-    group_indices.reserve(3 * max_triangles * max_num_clusters_per_group);
+  // todo: should be params
+  const size_t max_vertices = 255;
+  const size_t max_triangles = 128;
+  const float cone_weight = 0.5;  // 0.5f;
+  const size_t max_num_clusters_per_group = 4;
+  const float simplify_target_index_count_threshold = 0.2f;
+  const size_t max_lod_count = 2;  //25;
+  const float min_target_error = 1e-2f;
+  const float max_target_error = 1.0f;
 
-    // merge groups
-    for (const auto& meshlet_index : group) {
-      const auto& meshlet = meshlets.meshlets[meshlet_index];
-      std::transform(
-          meshlets.triangles.cbegin() + meshlet.triangle_offset,
-          meshlets.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
-          std::back_inserter(group_indices),
-          [&meshlets, &meshlet](const auto& vertex_index) {
-            return meshlets.vertices[meshlet.vertex_offset + vertex_index];
-          });
-    }
+  float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
-    // todo: simplify group
-    // todo: maybe optional with attributes?
-    std::vector<uint32_t> simplified_indices(group_indices.size());
-    size_t target_index_count =
-        (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) *
-        2;  // we want to reduce ~50% of tris
-    const size_t lod = 1;
-    float lod_target_error_scale = static_cast<float>(lod) / static_cast<float>(max_lod_count);
-    float step_target_error = std::lerp(min_target_error, max_target_error, lod_target_error_scale) * simplify_scale; // range [0..1] todo: what should that be? probably should depend on lod?
-    uint32_t simplification_options =
-        meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
-    float simplification_error = 0.0f;
+  // todo: maybe optimize mesh before generating meshlets? since we don't use scan should be fine without?
 
-    simplified_indices.resize(meshopt_simplify(
-        simplified_indices.data(),
-        group_indices.data(),
-        group_indices.size(),
+  const Meshlets meshlets =
+      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+
+  /*
+  std::vector<meshopt_Bounds> bounds{};
+  bounds.reserve(meshlets.meshlets.size());
+  const auto start_meshlet_bounds = std::chrono::high_resolution_clock::now();
+  for (const auto& meshlet : meshlets.meshlets) {
+    bounds.push_back(meshopt_computeMeshletBounds(
+        &meshlets.vertices[meshlet.vertex_offset],
+        &meshlets.triangles[meshlet.triangle_offset],
+        meshlet.triangle_count,
         vertices.data(),
         vertex_count,
-        vertex_stride,
-        target_index_count,
-        step_target_error,
-        simplification_options,
-        &simplification_error));
+        vertex_stride));
+  }
+  const auto end_meshlet_bounds = std::chrono::high_resolution_clock::now();
+  printf(
+      "meshlet bounds: took %ld ms\n",
+      std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
+  */
+
+  for (size_t level = 1; level < max_lod_count; ++level) {
+    const auto groups = group_clusters(meshlets, max_num_clusters_per_group);
 
     /*
+    for (const auto& group : groups) {
+      printf("\nnew group");
+      for (const auto i : group) {
+        printf("\n\tcluster %i:", int(i));
+        for (const auto j : group) {
+          if (i == j)
+            continue;
+          printf(" %i=%i", int(j), int(graph_edge_weights[i][j]));
+        }
+        printf("\n\tother :");
+        for (const auto [j, c] : graph_edge_weights[i]) {
+          printf(" %i=%i", int(j), int(c));
+        }
+      }
+    }
+    */
+
+    size_t num_new_meshlets = 0;
+    size_t num_not_simplified = 0;
+    const auto start_process_groups = std::chrono::high_resolution_clock::now();
+    for (const auto& group : groups) {
+      std::vector<uint32_t> group_indices{};
+      group_indices.reserve(3 * max_triangles * max_num_clusters_per_group);
+
+      // merge groups
+      for (const auto& meshlet_index : group) {
+        const auto& meshlet = meshlets.meshlets[meshlet_index];
+        std::transform(
+            meshlets.triangles.cbegin() + meshlet.triangle_offset,
+            meshlets.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
+            std::back_inserter(group_indices),
+            [&meshlets, &meshlet](const auto& vertex_index) {
+              return meshlets.vertices[meshlet.vertex_offset + vertex_index];
+            });
+      }
+
+      // todo: simplify group
+      // todo: maybe optional with attributes?
+      std::vector<uint32_t> simplified_indices(group_indices.size());
+      size_t target_index_count =
+          (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) *
+          2;  // we want to reduce ~50% of tris
+      const size_t lod = 1;
+      float lod_target_error_scale = static_cast<float>(lod) / static_cast<float>(max_lod_count);
+      float step_target_error =
+          std::lerp(min_target_error, max_target_error, lod_target_error_scale) *
+          simplify_scale;  // range [0..1] todo: what should that be? probably should depend on lod?
+      uint32_t simplification_options =
+          meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
+      float simplification_error = 0.0f;
+
+      simplified_indices.resize(meshopt_simplify(
+          simplified_indices.data(),
+          group_indices.data(),
+          group_indices.size(),
+          vertices.data(),
+          vertex_count,
+          vertex_stride,
+          target_index_count,
+          step_target_error,
+          simplification_options,
+          &simplification_error));
+
+      /*
     printf(
         "simplified has %i indices (%i tris) vs %i (%i tris) before simplify (%i target tri count, %i target index "
         "count, %f target error)\n",
@@ -402,48 +592,54 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         target_error);
     */
 
-    // todo: optimize group? since we don't use scan should be fine without?
+      // todo: optimize group? since we don't use scan should be fine without?
 
-    size_t max_group_meshlets = meshopt_buildMeshletsBound(simplified_indices.size(), max_vertices, max_triangles);
-    std::vector<meshopt_Meshlet> group_meshlet(max_group_meshlets);
-    std::vector<unsigned int> group_meshlet_vertices(max_group_meshlets * max_vertices);
-    std::vector<unsigned char> group_meshlet_triangles(max_group_meshlets * max_triangles * 3);
+      size_t max_group_meshlets = meshopt_buildMeshletsBound(simplified_indices.size(), max_vertices, max_triangles);
+      std::vector<meshopt_Meshlet> group_meshlet(max_group_meshlets);
+      std::vector<unsigned int> group_meshlet_vertices(max_group_meshlets * max_vertices);
+      std::vector<unsigned char> group_meshlet_triangles(max_group_meshlets * max_triangles * 3);
 
-    group_meshlet.resize(meshopt_buildMeshlets(
-        group_meshlet.data(),
-        group_meshlet_vertices.data(),
-        group_meshlet_triangles.data(),
-        simplified_indices.data(),
-        simplified_indices.size(),
-        vertices.data(),
-        vertex_count,
-        vertex_stride,
-        max_vertices,
-        max_triangles,
-        cone_weight));
+      group_meshlet.resize(meshopt_buildMeshlets(
+          group_meshlet.data(),
+          group_meshlet_vertices.data(),
+          group_meshlet_triangles.data(),
+          simplified_indices.data(),
+          simplified_indices.size(),
+          vertices.data(),
+          vertex_count,
+          vertex_stride,
+          max_vertices,
+          max_triangles,
+          cone_weight));
 
-    num_new_meshlets += group_meshlet.size();
+      num_new_meshlets += group_meshlet.size();
 
-    if (group_meshlet.size() >= max_num_clusters_per_group) {
-      ++num_not_simplified;
+      if (group_meshlet.size() >= max_num_clusters_per_group) {
+        ++num_not_simplified;
+      }
+
+      //printf("next lod has %i meshlets\n", int(group_meshlet.size()));
+
+      for (const auto& meshlet : group_meshlet) {
+        meshopt_optimizeMeshlet(
+            &group_meshlet_vertices[meshlet.vertex_offset],
+            &group_meshlet_triangles[meshlet.triangle_offset],
+            meshlet.triangle_count,
+            meshlet.vertex_count);
+      }
     }
+    const auto end_process_groups = std::chrono::high_resolution_clock::now();
+    printf(
+        "process groups: took %ld ms\n",
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
 
-    //printf("next lod has %i meshlets\n", int(group_meshlet.size()));
-
-    for (const auto& meshlet : group_meshlet) {
-      meshopt_optimizeMeshlet(
-          &group_meshlet_vertices[meshlet.vertex_offset],
-          &group_meshlet_triangles[meshlet.triangle_offset],
-          meshlet.triangle_count,
-          meshlet.vertex_count);
-    }
+    printf(
+        "num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n",
+        int(num_new_meshlets),
+        int(meshlets.meshlets.size()),
+        int(meshlets.meshlets.size()) / 2,
+        int(num_not_simplified));
   }
-  const auto end_process_groups = std::chrono::high_resolution_clock::now();
-  printf(
-      "process groups: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
-
-  printf("num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n", int(num_new_meshlets), int(meshlets.meshlets.size()), int(meshlets.meshlets.size()) / 2, int(num_not_simplified));
 
   // todo:
   // insert into dag
