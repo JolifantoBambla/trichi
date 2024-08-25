@@ -279,95 +279,8 @@ struct Graph {
     }
     if ((xadj[i + 1] - xadj[i]) == 0) {
       ++no_neighbors_count;
-
-      printf("%i: no neighbors", int(i));
-
-      /*
-      const auto& m = meshlets.meshlets[i];
-      const auto edges = extract_cluster_edges(meshlets, i);
-
-      for (size_t j = 0; j < boundaries.size(); ++j) {
-        if (i == j)
-          continue;
-        const auto other_edges = extract_cluster_edges(meshlets, j);
-        for (const auto& [e, c] : edges) {
-          if (other_edges.contains(e)) {
-            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
-            const uint32_t v2 = static_cast<uint32_t>(e);
-            printf(
-                "\n\t%i has shared non-boundary edge (%u-%u (c: %i vs %i)) with %i",
-                int(i),
-                v1,
-                v2,
-                c,
-                other_edges.at(e),
-                int(j));
-          }
-        }
-      }
-
-      const auto vertices = std::span(meshlets.vertices.begin() + m.vertex_offset, m.vertex_count);
-      for (size_t j = 0; j < meshlets.meshlets.size(); ++j) {
-        if (i == j) {
-          continue;
-        }
-        const auto& other = meshlets.meshlets[j];
-        const auto other_verts = std::span(meshlets.vertices.begin() + other.vertex_offset, other.vertex_count);
-        std::vector<uint32_t> shared_vertices{};
-        for (const auto& v : vertices) {
-          if (std::find(other_verts.begin(), other_verts.end(), v) != other_verts.end()) {
-            shared_vertices.push_back(v);
-          }
-        }
-        if (!shared_vertices.empty()) {
-          printf("\n\t%i has %i shared vertices with %i: ", int(i), int(shared_vertices.size()), int(j));
-          for (const auto& v : shared_vertices) {
-            printf(" %u", v);
-          }
-          printf("\n\tboundary edges: ");
-          for (const auto& b : boundary) {
-            printf(" %u-%u", static_cast<uint32_t>(b >> 32), static_cast<uint32_t>(b));
-          }
-          printf("\n\tedges: ");
-          for (const auto& [e, c] : edges) {
-            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
-            const uint32_t v2 = static_cast<uint32_t>(e);
-            if (std::find(shared_vertices.begin(), shared_vertices.end(), v1) != shared_vertices.end() ||
-                std::find(shared_vertices.begin(), shared_vertices.end(), v2) != shared_vertices.end()) {
-              printf("\n\t\t");
-            }
-            printf(" %u-%u (%i)", static_cast<uint32_t>(e >> 32), static_cast<uint32_t>(e), int(c));
-          }
-          printf("\n\tother edges: ");
-          for (const auto& [e, c] : extract_cluster_edges(meshlets, j)) {
-            const uint32_t v1 = static_cast<uint32_t>(e >> 32);
-            const uint32_t v2 = static_cast<uint32_t>(e);
-            if (std::find(shared_vertices.begin(), shared_vertices.end(), v1) != shared_vertices.end() ||
-                std::find(shared_vertices.begin(), shared_vertices.end(), v2) != shared_vertices.end()) {
-              printf("\n\t\t");
-            }
-            printf(" %u-%u (%i)", static_cast<uint32_t>(e >> 32), static_cast<uint32_t>(e), int(c));
-          }
-        }
-        for (const auto& v : shared_vertices) {
-          for (const auto b : boundary) {
-            const uint32_t v1 = b >> 32;
-            const uint32_t v2 = b;
-            if (v == v1 && v == v2) {
-              printf("\n\t\tshared vert is in boundary: %u", v);
-            }
-          }
-          for (const auto b : boundaries[j]) {
-            const uint32_t v1 = b >> 32;
-            const uint32_t v2 = b;
-            if (v == v1 && v == v2) {
-              printf("\n\t\tshared vert is in boundary of other: %u", v);
-            }
-          }
-        }
-      }
-       */
-      printf("\n");
+      // todo: if mesh is broken, boundary can't be determined by comparing indices -> either let user fix their mesh or add compatibility mode that tries to find neighboring meshlets by comparing their vertex positions
+      printf("%i: no neighbors\n", int(i));
     }
     if (graph_edge_weights[i].empty()) {
       ++no_neighbors_count2;
@@ -464,24 +377,12 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   }
   const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
 
-  /*
-  printf("export const mesh = {\n\tvertex: [");
-  for (const auto f : vertices) {
-    printf("%f,", f);
-  }
-  printf("],\n\tindex: [");
-  for (const auto i : indices) {
-    printf("%u,", i);
-  }
-  printf("],\n};\n");
-   */
-
   // todo: should be params
   const size_t max_vertices = 255;
   const size_t max_triangles = 128;
   const float cone_weight = 0.5;  // 0.5f;
   const size_t max_num_clusters_per_group = 4;
-  const float simplify_target_index_count_threshold = 0.2f;
+  const float simplify_target_index_count_threshold = 0.5f;
   const size_t max_lod_count = 2;  //25;
   const float min_target_error = 1e-2f;
   const float max_target_error = 1.0f;
@@ -556,8 +457,8 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       // todo: maybe optional with attributes?
       std::vector<uint32_t> simplified_indices(group_indices.size());
       size_t target_index_count =
-          (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) *
-          2;  // we want to reduce ~50% of tris
+          // we want to reduce ~50% of tris
+          (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) * 2;
       const size_t lod = 1;
       float lod_target_error_scale = static_cast<float>(lod) / static_cast<float>(max_lod_count);
       float step_target_error =

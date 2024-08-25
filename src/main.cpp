@@ -9,7 +9,7 @@
 
 int main() {
   const std::string meshPath =
-      "/home/lukas/Projects/per-meshlet-nuances/assets/bunny2.obj";  //stanford_bunny.obj";  //"/home/lukas/Projects/per-meshlet-nuances/assets/stanford_bunny.obj";
+      "/home/lukas/Projects/per-meshlet-nuances/assets/lucy.obj";  //stanford_bunny.obj";  //"/home/lukas/Projects/per-meshlet-nuances/assets/stanford_bunny.obj";
 
   Assimp::Importer importer;
   const struct aiScene* scene = importer.ReadFile(
