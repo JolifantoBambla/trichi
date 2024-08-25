@@ -333,7 +333,7 @@ struct Graph {
 [[nodiscard]] std::vector<std::vector<size_t>> partition_graph(Graph graph, size_t max_clusters_per_group) {
   auto numVertices = static_cast<idx_t>(graph.xadj.size() - 1);
   idx_t numConstraints = 1;  // 1 is the minimum allowed value
-  idx_t numParts = numVertices / static_cast<idx_t>(max_clusters_per_group);
+  idx_t numParts = std::max(numVertices / static_cast<idx_t>(max_clusters_per_group), 2);
   idx_t edgeCut = 0;
   std::vector<idx_t> partition = std::vector<idx_t>(numVertices, 0);
   std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions(graph.is_contiguous);
@@ -499,16 +499,13 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   const float cone_weight = 0.5;  // 0.5f;
   const size_t max_num_clusters_per_group = 4;
   const float simplify_target_index_count_threshold = 0.5f;
-  const size_t max_lod_count = 2;  //25;
+  const size_t max_lod_count = 25;
   const float min_target_error = 1e-2f;
   const float max_target_error = 1.0f;
 
   float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
   // todo: maybe optimize mesh before generating meshlets? since we don't use scan should be fine without?
-
-  const Meshlets meshlets =
-      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
 
   /*
   std::vector<meshopt_Bounds> bounds{};
@@ -529,24 +526,34 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
   */
 
-  std::vector<Cluster> clusterPool{};
-  clusterPool.reserve(meshlets.meshlets.size());
-  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
-    clusterPool.push_back(Cluster{
+  std::vector<std::vector<Meshlets>> meshlets = {
+      {build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight)}};
+
+  std::vector<Cluster> clusters(meshlets[0][0].meshlets.size());
+  for (size_t i = 0; i < clusters.size(); ++i) {
+    clusters[i] = Cluster{
         .index = i,
-        .buffers = &meshlets,
-    });
+        .buffers = &meshlets[0][0],
+    };
   }
 
   for (size_t level = 1; level < max_lod_count; ++level) {
+    if (clusters.size() <= 1) {
+      break;
+    }
+
     const float lod_scale = static_cast<float>(level) / static_cast<float>(max_lod_count);
-    const auto groups = group_clusters(clusterPool, max_num_clusters_per_group);
+    const auto groups = group_clusters(clusters, max_num_clusters_per_group);
 
     size_t num_new_meshlets = 0;
     size_t num_not_simplified = 0;
+
+    auto& lod_meshlets = meshlets.emplace_back(groups.size());
+    std::vector<Cluster> next_clusters{};
     const auto start_process_groups = std::chrono::high_resolution_clock::now();
-    for (const auto& group : groups) {
-      const auto group_indices = merge_group(clusterPool, group, max_triangles);
+    for (size_t i = 0; i < groups.size(); ++i) {
+      const auto& group = groups[i];
+      const auto group_indices = merge_group(clusters, groups[i], max_triangles);
 
       const auto simplified_indices = simplify_group(
           group_indices,
@@ -562,13 +569,26 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
       // todo: optimize group? since we don't use scan should be fine without?
 
-      const auto group_meshlets = build_meshlets(
-          simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
-
-      num_new_meshlets += group_meshlets.meshlets.size();
+      auto group_meshlets = std::move(build_meshlets(
+          simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight));
 
       if (group_meshlets.meshlets.size() >= max_num_clusters_per_group) {
-        ++num_not_simplified;
+        num_not_simplified += groups[i].size();
+
+        std::transform(
+            group.cbegin(), group.cend(), std::back_inserter(next_clusters), [&clusters](const size_t cluster_index) {
+              return clusters[cluster_index];
+            });
+      } else {
+        num_new_meshlets += group_meshlets.meshlets.size();
+
+        lod_meshlets[i] = std::move(group_meshlets);
+        for (size_t cluster_index = 0; cluster_index < lod_meshlets[i].meshlets.size(); ++cluster_index) {
+          next_clusters.emplace_back(Cluster{
+              .index = cluster_index,
+              .buffers = &lod_meshlets[i],
+          });
+        }
       }
     }
     const auto end_process_groups = std::chrono::high_resolution_clock::now();
@@ -577,19 +597,20 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
 
     printf(
-        "num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n",
+        "num meshlets: lod %i: %i vs lod 0: %i; target: %i; not simplified: %i\n",
+        int(level),
         int(num_new_meshlets),
-        int(meshlets.meshlets.size()),
-        int(meshlets.meshlets.size()) / 2,
+        int(clusters.size()),
+        int(clusters.size()) / 2,
         int(num_not_simplified));
+
+    // todo:
+    // insert into dag
+
+    clusters = std::move(next_clusters);
   }
 
-  // todo:
-  // insert into dag
-  // put new meshlets and meshlets that were not simplified back into pool
-  // repeat
-
-  // parallelize, optimize, tune
+  // parallelize, optimize runtime + memory usage, tune
 
   const auto end_time = std::chrono::high_resolution_clock::now();
   printf(
