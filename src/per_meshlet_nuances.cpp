@@ -369,6 +369,59 @@ struct Graph {
   return std::move(partition_graph(std::move(build_cluster_graph(meshlets)), max_clusters_per_group));
 }
 
+[[nodiscard]] std::vector<unsigned int>
+merge_group(const Meshlets& meshlets, const std::vector<size_t>& group, size_t max_triangles) {
+  std::vector<uint32_t> group_indices{};
+  group_indices.reserve(3 * max_triangles * group.size());
+  for (const auto& meshlet_index : group) {
+    const auto& meshlet = meshlets.meshlets[meshlet_index];
+    std::transform(
+        meshlets.triangles.cbegin() + meshlet.triangle_offset,
+        meshlets.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
+        std::back_inserter(group_indices),
+        [&meshlets, &meshlet](const auto& vertex_index) {
+          return meshlets.vertices[meshlet.vertex_offset + vertex_index];
+        });
+  }
+  return std::move(group_indices);
+}
+
+[[nodiscard]] std::vector<unsigned int> simplify_group(
+    const std::vector<unsigned int>& group_indices,
+    const std::vector<float>& vertices,
+    size_t vertex_count,
+    size_t vertex_stride,
+    size_t max_vertices,
+    float simplify_target_index_count_threshold,
+    float min_target_error,
+    float max_target_error,
+    float simplify_scale,
+    float lod_scale) {
+  // todo: maybe optional with attributes?
+  std::vector<uint32_t> simplified_indices(group_indices.size());
+  size_t target_index_count =
+      // we want to reduce ~50% of tris
+      (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) * 2;
+  float step_target_error = std::lerp(min_target_error, max_target_error, lod_scale) *
+                            simplify_scale;  // range [0..1] todo: what should that be? probably should depend on lod?
+  uint32_t simplification_options = meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
+  float simplification_error = 0.0f;
+
+  simplified_indices.resize(meshopt_simplify(
+      simplified_indices.data(),
+      group_indices.data(),
+      group_indices.size(),
+      vertices.data(),
+      vertex_count,
+      vertex_stride,
+      target_index_count,
+      step_target_error,
+      simplification_options,
+      &simplification_error));
+
+  return std::move(simplified_indices);
+}
+
 void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
   const auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -414,119 +467,36 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   */
 
   for (size_t level = 1; level < max_lod_count; ++level) {
+    const float lod_scale = static_cast<float>(level) / static_cast<float>(max_lod_count);
     const auto groups = group_clusters(meshlets, max_num_clusters_per_group);
-
-    /*
-    for (const auto& group : groups) {
-      printf("\nnew group");
-      for (const auto i : group) {
-        printf("\n\tcluster %i:", int(i));
-        for (const auto j : group) {
-          if (i == j)
-            continue;
-          printf(" %i=%i", int(j), int(graph_edge_weights[i][j]));
-        }
-        printf("\n\tother :");
-        for (const auto [j, c] : graph_edge_weights[i]) {
-          printf(" %i=%i", int(j), int(c));
-        }
-      }
-    }
-    */
 
     size_t num_new_meshlets = 0;
     size_t num_not_simplified = 0;
     const auto start_process_groups = std::chrono::high_resolution_clock::now();
     for (const auto& group : groups) {
-      std::vector<uint32_t> group_indices{};
-      group_indices.reserve(3 * max_triangles * max_num_clusters_per_group);
+      const auto group_indices = merge_group(meshlets, group, max_triangles);
 
-      // merge groups
-      for (const auto& meshlet_index : group) {
-        const auto& meshlet = meshlets.meshlets[meshlet_index];
-        std::transform(
-            meshlets.triangles.cbegin() + meshlet.triangle_offset,
-            meshlets.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
-            std::back_inserter(group_indices),
-            [&meshlets, &meshlet](const auto& vertex_index) {
-              return meshlets.vertices[meshlet.vertex_offset + vertex_index];
-            });
-      }
-
-      // todo: simplify group
-      // todo: maybe optional with attributes?
-      std::vector<uint32_t> simplified_indices(group_indices.size());
-      size_t target_index_count =
-          // we want to reduce ~50% of tris
-          (static_cast<size_t>(static_cast<float>(max_vertices * simplify_target_index_count_threshold)) * 3) * 2;
-      const size_t lod = 1;
-      float lod_target_error_scale = static_cast<float>(lod) / static_cast<float>(max_lod_count);
-      float step_target_error =
-          std::lerp(min_target_error, max_target_error, lod_target_error_scale) *
-          simplify_scale;  // range [0..1] todo: what should that be? probably should depend on lod?
-      uint32_t simplification_options =
-          meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
-      float simplification_error = 0.0f;
-
-      simplified_indices.resize(meshopt_simplify(
-          simplified_indices.data(),
-          group_indices.data(),
-          group_indices.size(),
-          vertices.data(),
-          vertex_count,
-          vertex_stride,
-          target_index_count,
-          step_target_error,
-          simplification_options,
-          &simplification_error));
-
-      /*
-    printf(
-        "simplified has %i indices (%i tris) vs %i (%i tris) before simplify (%i target tri count, %i target index "
-        "count, %f target error)\n",
-        int(simplified_indices.size()),
-        int(simplified_indices.size() / 3),
-        int(group_indices.size()),
-        int(group_indices.size() / 3),
-        int(target_index_count / 3),
-        int(target_index_count),
-        target_error);
-    */
-
-      // todo: optimize group? since we don't use scan should be fine without?
-
-      size_t max_group_meshlets = meshopt_buildMeshletsBound(simplified_indices.size(), max_vertices, max_triangles);
-      std::vector<meshopt_Meshlet> group_meshlet(max_group_meshlets);
-      std::vector<unsigned int> group_meshlet_vertices(max_group_meshlets * max_vertices);
-      std::vector<unsigned char> group_meshlet_triangles(max_group_meshlets * max_triangles * 3);
-
-      group_meshlet.resize(meshopt_buildMeshlets(
-          group_meshlet.data(),
-          group_meshlet_vertices.data(),
-          group_meshlet_triangles.data(),
-          simplified_indices.data(),
-          simplified_indices.size(),
-          vertices.data(),
+      const auto simplified_indices = simplify_group(
+          group_indices,
+          vertices,
           vertex_count,
           vertex_stride,
           max_vertices,
-          max_triangles,
-          cone_weight));
+          simplify_target_index_count_threshold,
+          min_target_error,
+          max_target_error,
+          simplify_scale,
+          lod_scale);
 
-      num_new_meshlets += group_meshlet.size();
+      // todo: optimize group? since we don't use scan should be fine without?
 
-      if (group_meshlet.size() >= max_num_clusters_per_group) {
+      const auto group_meshlets = build_meshlets(
+          simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+
+      num_new_meshlets += group_meshlets.meshlets.size();
+
+      if (group_meshlets.meshlets.size() >= max_num_clusters_per_group) {
         ++num_not_simplified;
-      }
-
-      //printf("next lod has %i meshlets\n", int(group_meshlet.size()));
-
-      for (const auto& meshlet : group_meshlet) {
-        meshopt_optimizeMeshlet(
-            &group_meshlet_vertices[meshlet.vertex_offset],
-            &group_meshlet_triangles[meshlet.triangle_offset],
-            meshlet.triangle_count,
-            meshlet.vertex_count);
       }
     }
     const auto end_process_groups = std::chrono::high_resolution_clock::now();
