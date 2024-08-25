@@ -64,13 +64,17 @@ struct std::hash<pmn::MeshletId> {
 };
 
 namespace pmn {
-// todo: figure out API, move impl to private files
-void generateNextLod() {}
-
 struct Meshlets {
   std::vector<meshopt_Meshlet> meshlets;
   std::vector<unsigned int> vertices;
   std::vector<unsigned char> triangles;
+};
+
+struct Cluster {
+  size_t index;
+  const Meshlets* buffers;
+
+  [[nodiscard]] const meshopt_Meshlet& getMeshlet() const { return buffers->meshlets[index]; }
 };
 
 struct DagNode {
@@ -422,6 +426,58 @@ merge_group(const Meshlets& meshlets, const std::vector<size_t>& group, size_t m
   return std::move(simplified_indices);
 }
 
+/*
+[[nodiscard]] std::vector<Cluster> process_cluster_pool(const std::vector<Cluster>& clusters) {
+  std::vector<Cluster> next{};
+  next.reserve(clusters.size() / 2);
+
+  const auto groups = group_clusters(meshlets, max_num_clusters_per_group);
+
+  size_t num_new_meshlets = 0;
+  size_t num_not_simplified = 0;
+  const auto start_process_groups = std::chrono::high_resolution_clock::now();
+  for (const auto& group : groups) {
+    const auto group_indices = merge_group(meshlets, group, max_triangles);
+
+    const auto simplified_indices = simplify_group(
+        group_indices,
+        vertices,
+        vertex_count,
+        vertex_stride,
+        max_vertices,
+        simplify_target_index_count_threshold,
+        min_target_error,
+        max_target_error,
+        simplify_scale,
+        lod_scale);
+
+    // todo: optimize group? since we don't use scan should be fine without?
+
+    const auto group_meshlets = build_meshlets(
+        simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+
+    num_new_meshlets += group_meshlets.meshlets.size();
+
+    if (group_meshlets.meshlets.size() >= max_num_clusters_per_group) {
+      ++num_not_simplified;
+    }
+  }
+  const auto end_process_groups = std::chrono::high_resolution_clock::now();
+  printf(
+      "process groups: took %ld ms\n",
+      std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
+
+  printf(
+      "num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n",
+      int(num_new_meshlets),
+      int(meshlets.meshlets.size()),
+      int(meshlets.meshlets.size()) / 2,
+      int(num_not_simplified));
+
+  return next;
+}
+*/
+
 void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
   const auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -465,6 +521,15 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       "meshlet bounds: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
   */
+
+  std::vector<Cluster> clusterPool{};
+  clusterPool.reserve(meshlets.meshlets.size());
+  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
+    clusterPool.push_back(Cluster{
+        .index = i,
+        .buffers = &meshlets,
+    });
+  }
 
   for (size_t level = 1; level < max_lod_count; ++level) {
     const float lod_scale = static_cast<float>(level) / static_cast<float>(max_lod_count);
