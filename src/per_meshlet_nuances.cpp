@@ -92,14 +92,20 @@ struct Dag {
   return (std::min(a, b) << 32) | std::max(a, b);
 }
 
-[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Meshlets& meshlets, size_t meshlet_index) {
-  const meshopt_Meshlet& meshlet = meshlets.meshlets[meshlet_index];
+[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(
+    const std::vector<Cluster>& clusters,
+    size_t meshlet_index) {
+  const Cluster& cluster = clusters[meshlet_index];
+  const meshopt_Meshlet& meshlet = cluster.getMeshlet();
   std::unordered_map<uint64_t, int> edges{};
   for (size_t i = 0; i < meshlet.triangle_count; ++i) {
     const size_t triangle_offset = meshlet.triangle_offset + i * 3;
-    const uint64_t a = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 0]];
-    const uint64_t b = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 1]];
-    const uint64_t c = meshlets.vertices[meshlet.vertex_offset + meshlets.triangles[triangle_offset + 2]];
+    const uint64_t a =
+        cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 0]];
+    const uint64_t b =
+        cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 1]];
+    const uint64_t c =
+        cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 2]];
     const uint64_t e1 = pack_sorted(a, b);
     const uint64_t e2 = pack_sorted(a, c);
     const uint64_t e3 = pack_sorted(b, c);
@@ -205,13 +211,13 @@ struct Dag {
   return std::move(meshlets);
 }
 
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const Meshlets& meshlets) {
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters) {
   // compute boundary for each cluster
-  std::vector<std::vector<uint64_t>> boundaries(meshlets.meshlets.size());
+  std::vector<std::vector<uint64_t>> boundaries(clusters.size());
   const auto start_meshlet_boundary = std::chrono::high_resolution_clock::now();
-  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
+  for (size_t i = 0; i < clusters.size(); ++i) {
     // find edges
-    const auto edges = extract_cluster_edges(meshlets, i);
+    const auto edges = extract_cluster_edges(clusters, i);
 
     // find boundary = find edges that only appear once
     auto& boundary = boundaries[i];
@@ -239,16 +245,16 @@ struct Graph {
   bool is_contiguous;
 };
 
-[[nodiscard]] Graph build_cluster_graph(const Meshlets& meshlets) {
-  const auto boundaries = extract_boundaries(meshlets);
+[[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters) {
+  const auto boundaries = extract_boundaries(clusters);
 
   // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
   std::atomic<size_t> no_neighbors_count = 0;
   std::atomic<size_t> no_neighbors_count2 = 0;
   std::vector<std::unordered_map<size_t, size_t>> graph_edge_weights{};
-  graph_edge_weights.reserve(meshlets.meshlets.size());
+  graph_edge_weights.reserve(clusters.size());
   std::vector<idx_t> xadj = {0};
-  xadj.reserve(meshlets.meshlets.size() + 1);
+  xadj.reserve(clusters.size() + 1);
   std::vector<idx_t> adjacency{};
   std::vector<idx_t> adjwght{};
 
@@ -299,7 +305,7 @@ struct Graph {
   printf(
       "%i of %i meshlets have no neighbors, %i have no neighborhood\n",
       int(no_neighbors_count),
-      int(meshlets.meshlets.size()),
+      int(clusters.size()),
       int(no_neighbors_count2));
 
   return Graph{
@@ -368,23 +374,24 @@ struct Graph {
 }
 
 [[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
-    const Meshlets& meshlets,
+    const std::vector<Cluster>& clusters,
     size_t max_clusters_per_group = 4) {
-  return std::move(partition_graph(std::move(build_cluster_graph(meshlets)), max_clusters_per_group));
+  return std::move(partition_graph(std::move(build_cluster_graph(clusters)), max_clusters_per_group));
 }
 
 [[nodiscard]] std::vector<unsigned int>
-merge_group(const Meshlets& meshlets, const std::vector<size_t>& group, size_t max_triangles) {
+merge_group(const std::vector<Cluster>& clusters, const std::vector<size_t>& group, size_t max_triangles) {
   std::vector<uint32_t> group_indices{};
   group_indices.reserve(3 * max_triangles * group.size());
   for (const auto& meshlet_index : group) {
-    const auto& meshlet = meshlets.meshlets[meshlet_index];
+    const auto& cluster = clusters[meshlet_index];
+    const auto& meshlet = cluster.getMeshlet();
     std::transform(
-        meshlets.triangles.cbegin() + meshlet.triangle_offset,
-        meshlets.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
+        cluster.buffers->triangles.cbegin() + meshlet.triangle_offset,
+        cluster.buffers->triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
         std::back_inserter(group_indices),
-        [&meshlets, &meshlet](const auto& vertex_index) {
-          return meshlets.vertices[meshlet.vertex_offset + vertex_index];
+        [&cluster, &meshlet](const auto& vertex_index) {
+          return cluster.buffers->vertices[meshlet.vertex_offset + vertex_index];
         });
   }
   return std::move(group_indices);
@@ -533,13 +540,13 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   for (size_t level = 1; level < max_lod_count; ++level) {
     const float lod_scale = static_cast<float>(level) / static_cast<float>(max_lod_count);
-    const auto groups = group_clusters(meshlets, max_num_clusters_per_group);
+    const auto groups = group_clusters(clusterPool, max_num_clusters_per_group);
 
     size_t num_new_meshlets = 0;
     size_t num_not_simplified = 0;
     const auto start_process_groups = std::chrono::high_resolution_clock::now();
     for (const auto& group : groups) {
-      const auto group_indices = merge_group(meshlets, group, max_triangles);
+      const auto group_indices = merge_group(clusterPool, group, max_triangles);
 
       const auto simplified_indices = simplify_group(
           group_indices,
