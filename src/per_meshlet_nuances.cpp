@@ -546,6 +546,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
   */
 
+  std::vector<size_t> lod_offsets = {0};
   Meshlets meshlets =
       build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
 
@@ -561,6 +562,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     if (clusters.size() <= 1) {
       break;
     }
+    lod_offsets.emplace_back(meshlets.meshlets.size());
 
     bool is_last = clusters.size() <= max_num_clusters_per_group;
 
