@@ -678,6 +678,11 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   // parallelize, optimize runtime + memory usage, tune
 
+  // todo: how to pack as gltf (?) (not part of the lib but for my personal use)
+  //  - meshlet data in buffers (bounds, normal cone, error), dag?
+  //  - each lod as a mesh? store lod hierarchy info in extras
+  //  - each meshlet as a primitive? store hierarchy info (child indices, etc.) and culling (cluster bounds, normal cone, error) in extras
+
   const auto end_time = std::chrono::high_resolution_clock::now();
   printf(
       "create dag: took %ld ms\n",
