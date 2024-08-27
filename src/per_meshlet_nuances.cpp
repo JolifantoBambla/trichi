@@ -89,8 +89,8 @@ struct Dag {
   std::unordered_map<uint32_t, Meshlets> meshlets;
 };
 
-[[nodiscard]] uint64_t pack_sorted(uint64_t a, uint64_t b) {
-  return (std::min(a, b) << 32) | std::max(a, b);
+[[nodiscard]] uint64_t pack_sorted(uint32_t a, uint32_t b) {
+  return (static_cast<uint64_t>(std::min(a, b)) << 32) | std::max(a, b);
 }
 
 [[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(
@@ -101,29 +101,20 @@ struct Dag {
   std::unordered_map<uint64_t, int> edges{};
   for (size_t i = 0; i < meshlet.triangle_count; ++i) {
     const size_t triangle_offset = meshlet.triangle_offset + i * 3;
-    const uint64_t a =
+    const uint32_t a =
         cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 0]];
-    const uint64_t b =
+    const uint32_t b =
         cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 1]];
-    const uint64_t c =
+    const uint32_t c =
         cluster.buffers->vertices[meshlet.vertex_offset + cluster.buffers->triangles[triangle_offset + 2]];
-    const uint64_t e1 = pack_sorted(a, b);
-    const uint64_t e2 = pack_sorted(a, c);
-    const uint64_t e3 = pack_sorted(b, c);
-    if (!edges.contains(e1)) {
-      edges[e1] = 1;
-    } else {
-      ++edges[e1];
+    if (auto [edge, inserted] = edges.try_emplace(pack_sorted(a, b), 1); !inserted) {
+      ++(edge->second);
     }
-    if (!edges.contains(e2)) {
-      edges[e2] = 1;
-    } else {
-      ++edges[e2];
+    if (auto [edge, inserted] = edges.try_emplace(pack_sorted(a, c), 1); !inserted) {
+      ++(edge->second);
     }
-    if (!edges.contains(e3)) {
-      edges[e3] = 1;
-    } else {
-      ++edges[e3];
+    if (auto [edge, inserted] = edges.try_emplace(pack_sorted(b, c), 1); !inserted) {
+      ++(edge->second);
     }
   }
   return std::move(edges);
