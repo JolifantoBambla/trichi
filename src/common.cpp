@@ -45,4 +45,34 @@ void extract_boundary(const Cluster& cluster, std::vector<uint64_t>& boundary) {
   // sort boundary for later use of set_union
   std::sort(boundary.begin(), boundary.end());
 }
+
+void init_dag_node(
+    const Cluster& cluster,
+    DagNode& dagNode,
+    const std::vector<float>& vertices,
+    size_t vertex_count,
+    size_t vertex_stride,
+    size_t cluster_index,
+    size_t level,
+    float error) {
+  const auto bounds = meshopt_computeMeshletBounds(
+      &cluster.buffers->vertices[cluster.buffers->meshlets[cluster.index].vertex_offset],
+      &cluster.buffers->triangles[cluster.buffers->meshlets[cluster.index].triangle_offset],
+      cluster.buffers->meshlets[cluster.index].triangle_count,
+      vertices.data(),
+      vertex_count,
+      vertex_stride);
+
+  dagNode.clusterIndex = cluster_index;
+  dagNode.level = level;
+  dagNode.bounds.radius = bounds.radius;
+  dagNode.bounds.cone_cutoff = bounds.cone_cutoff;
+  for (size_t c = 0; c < 3; ++c) {
+    dagNode.bounds.center[c] = bounds.center[c];
+    dagNode.bounds.cone_apex[c] = bounds.center[c];
+    dagNode.bounds.cone_axis[c] = bounds.center[c];
+  }
+  dagNode.bounds.error = error;
+}
+
 }  // namespace pmn

@@ -21,15 +21,42 @@ struct MeshletsBuffers {
 };
 
 struct Cluster {
-  size_t index;
-  const MeshletsBuffers* buffers;
+  size_t index{};
+  MeshletsBuffers* buffers = nullptr;
+  size_t dag_index = 0;
 
   [[nodiscard]] const meshopt_Meshlet& getMeshlet() const { return buffers->meshlets[index]; }
+};
+
+struct ClusterBounds {
+  float center[3];
+  float radius;
+  float cone_axis[3];
+  float cone_cutoff;
+  float cone_apex[3];
+  float error;
+};
+
+struct DagNode {
+  size_t clusterIndex = 0;
+  size_t level = 0;
+  std::vector<size_t> children{};
+  ClusterBounds bounds{};
 };
 
 [[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster);
 
 void extract_boundary(const Cluster& cluster, std::vector<uint64_t>& boundary);
+
+void init_dag_node(
+    const Cluster& cluster,
+    DagNode& dagNode,
+    const std::vector<float>& vertices,
+    size_t vertex_count,
+    size_t vertex_stride,
+    size_t cluster_index,
+    size_t level,
+    float error);
 
 #ifdef PMN_PARALLEL
 [[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(

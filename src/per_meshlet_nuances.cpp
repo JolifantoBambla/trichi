@@ -36,22 +36,6 @@ struct std::hash<pmn::MeshletId> {
 
 namespace pmn {
 
-struct ClusterBounds {
-  float center[3];
-  float radius;
-  float cone_axis[3];
-  float cone_cutoff; /* = cos(angle/2) */
-  float cone_apex[3];
-  float error;
-};
-
-struct DagNode {
-  size_t clusterIndex = 0;
-  size_t level = 0;
-  std::vector<size_t> children{};
-  ClusterBounds bounds{};
-};
-
 [[nodiscard]] MeshletsBuffers build_meshlets(
     const std::vector<uint32_t>& indices,
     const std::vector<float>& vertices,
@@ -245,50 +229,30 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
-  std::vector<DagNode> dagNodes{};
-
   std::vector<size_t> lod_offsets = {0};
-  MeshletsBuffers meshlets =
-      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+  std::vector<MeshletsBuffers> lods = {
+      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight)};
 
-  std::vector<Cluster> clusters(meshlets.meshlets.size());
-  dagNodes.reserve(clusters.size());
+  std::vector<Cluster> clusters(lods[0].meshlets.size());
+  std::vector<DagNode> dagNodes(lods[0].meshlets.size());
   for (size_t i = 0; i < clusters.size(); ++i) {
-    const auto bounds = meshopt_computeMeshletBounds(
-        &meshlets.vertices[meshlets.meshlets[i].vertex_offset],
-        &meshlets.triangles[meshlets.meshlets[i].triangle_offset],
-        meshlets.meshlets[i].triangle_count,
-        vertices.data(),
-        vertex_count,
-        vertex_stride);
-
-    auto& dagNode = dagNodes.emplace_back();
-    dagNode.clusterIndex = i;
-    dagNode.level = 0;
-    dagNode.bounds.radius = bounds.radius;
-    dagNode.bounds.cone_cutoff = bounds.cone_cutoff;
-    for (size_t c = 0; c < 3; ++c) {
-      dagNode.bounds.center[c] = bounds.center[c];
-      dagNode.bounds.cone_apex[c] = bounds.center[c];
-      dagNode.bounds.cone_axis[c] = bounds.center[c];
-    }
-    dagNode.bounds.error = 0.0;
-
     clusters[i] = Cluster{
         .index = i,
-        .buffers = &meshlets,
+        .buffers = &lods[0],
+        .dag_index = i,
     };
+    init_dag_node(clusters[i], dagNodes[i], vertices, vertex_count, vertex_stride, i, 0, 0.0);
   }
 
   for (size_t level = 1; level < max_lod_count; ++level) {
     if (clusters.size() <= 1) {
       break;
     }
-    lod_offsets.emplace_back(meshlets.meshlets.size());
+    lod_offsets.emplace_back(lods[0].meshlets.size());
 
     bool is_last = clusters.size() <= max_num_clusters_per_group;
 
-    const float lod_scale = is_last ? 1.0 : static_cast<float>(level) / static_cast<float>(max_lod_count);
+    const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
     const auto groups =
         is_last ? build_final_cluster_group(clusters.size()) : group_clusters(clusters, max_num_clusters_per_group);
 
@@ -300,7 +264,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
     std::vector<MeshletsBuffers> lod_meshlets(groups.size());
     std::vector<std::vector<Cluster>> lod_clusters(groups.size());
-    const auto start_process_groups = std::chrono::high_resolution_clock::now();
+    std::vector<DagNode> lod_dag_nodes(groups.size() * 4);
     for (size_t i = 0; i < groups.size(); ++i) {
       const auto& group = groups[i];
       const auto group_indices = merge_group(clusters, groups[i], max_triangles);
@@ -332,19 +296,38 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         simplified = group_meshlets.meshlets.size() < group.size();
 
         if (simplified) {
-          num_new_meshlets += group_meshlets.meshlets.size();
+          size_t node_offset = num_new_meshlets.fetch_add(group_meshlets.meshlets.size());
           num_new_vertices += group_meshlets.vertices.size();
           num_new_triangles += group_meshlets.triangles.size();
           num_next_clusters += group_meshlets.meshlets.size();
 
-          lod_meshlets[i] = std::move(group_meshlets);
-          for (size_t cluster_index = 0; cluster_index < lod_meshlets[i].meshlets.size(); ++cluster_index) {
-            // todo: each cluster is a parent of each cluster in the group
-            lod_clusters[i].emplace_back(Cluster{
-                .index = cluster_index,
-                .buffers = &meshlets,
-            });
+          // the parent error can't be smaller than any error of its children for consistent lod selection
+          float dag_node_error = std::accumulate(
+              group.cbegin(),
+              group.cend(),
+              error,
+              [&clusters, &dagNodes](const float max_error, const size_t cluster_index) {
+                return std::max(max_error, dagNodes[clusters[cluster_index].dag_index].bounds.error);
+              });
+
+          std::vector<size_t> child_dag_indices(group.size());
+          for (size_t child_index = 0; child_index < group.size(); ++child_index) {
+            child_dag_indices[child_index] = clusters[group[child_index]].dag_index;
           }
+
+          for (size_t cluster_index = 0; cluster_index < group_meshlets.meshlets.size(); ++cluster_index) {
+            const size_t dag_node_index = node_offset + cluster_index;
+            const auto& cluster = lod_clusters[i].emplace_back(Cluster{
+                .index = cluster_index,
+                .buffers = &group_meshlets,
+                .dag_index = dag_node_index,
+            });
+            auto& node = lod_dag_nodes[dag_node_index];
+            init_dag_node(cluster, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
+            node.children.insert(node.children.end(), child_dag_indices.cbegin(), child_dag_indices.cend());
+          }
+
+          lod_meshlets[i] = std::move(group_meshlets);
         }
       }
       if (!simplified) {
@@ -356,36 +339,40 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         num_next_clusters += group.size();
       }
     }
-    const auto end_process_groups = std::chrono::high_resolution_clock::now();
-
-    dagNodes.reserve(dagNodes.size() + num_new_meshlets);
 
     std::vector<Cluster> next_clusters{};
     // merge meshlets & prepare next iteration's clusters
     {
       next_clusters.reserve(num_next_clusters);
 
-      meshlets.meshlets.reserve(meshlets.meshlets.size() + num_new_meshlets);
-      meshlets.vertices.reserve(meshlets.vertices.size() + num_new_vertices);
-      meshlets.triangles.reserve(meshlets.triangles.size() + num_new_triangles);
+      auto& next_meshlets = lods.emplace_back();
+
+      next_meshlets.meshlets.reserve(num_new_meshlets);
+      next_meshlets.vertices.reserve(num_new_vertices);
+      next_meshlets.triangles.reserve(num_new_triangles);
 
       for (size_t i = 0; i < groups.size(); ++i) {
         if (!lod_meshlets[i].meshlets.empty()) {
           for (size_t cluster_index = 0; cluster_index < lod_clusters[i].size(); ++cluster_index) {
-            lod_clusters[i][cluster_index].index += meshlets.meshlets.size();
-            lod_meshlets[i].meshlets[cluster_index].vertex_offset += meshlets.vertices.size();
-            lod_meshlets[i].meshlets[cluster_index].triangle_offset += meshlets.triangles.size();
+            auto& cluster = lod_clusters[i][cluster_index];
+            cluster.index += next_meshlets.meshlets.size();
+            cluster.buffers = &next_meshlets;
+            lod_dag_nodes[cluster.dag_index].clusterIndex = cluster.index;
+            cluster.dag_index += dagNodes.size();
+
+            lod_meshlets[i].meshlets[cluster_index].vertex_offset += next_meshlets.vertices.size();
+            lod_meshlets[i].meshlets[cluster_index].triangle_offset += next_meshlets.triangles.size();
           }
-          meshlets.meshlets.insert(
-              meshlets.meshlets.end(),
+          next_meshlets.meshlets.insert(
+              next_meshlets.meshlets.end(),
               std::make_move_iterator(lod_meshlets[i].meshlets.begin()),
               std::make_move_iterator(lod_meshlets[i].meshlets.end()));
-          meshlets.vertices.insert(
-              meshlets.vertices.end(),
+          next_meshlets.vertices.insert(
+              next_meshlets.vertices.end(),
               std::make_move_iterator(lod_meshlets[i].vertices.begin()),
               std::make_move_iterator(lod_meshlets[i].vertices.end()));
-          meshlets.triangles.insert(
-              meshlets.triangles.end(),
+          next_meshlets.triangles.insert(
+              next_meshlets.triangles.end(),
               std::make_move_iterator(lod_meshlets[i].triangles.begin()),
               std::make_move_iterator(lod_meshlets[i].triangles.end()));
         }
@@ -394,6 +381,12 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
             std::make_move_iterator(lod_clusters[i].begin()),
             std::make_move_iterator(lod_clusters[i].end()));
       }
+
+      dagNodes.reserve(dagNodes.size() + num_new_meshlets);
+      dagNodes.insert(
+          dagNodes.end(),
+          std::make_move_iterator(lod_dag_nodes.begin()),
+          std::make_move_iterator(lod_dag_nodes.begin() + static_cast<off_t>(num_new_meshlets)));
 
       printf(
           "num meshlets: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
@@ -411,6 +404,8 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     clusters = std::move(next_clusters);
   }
 
+  const auto root = dagNodes.back();
+  
   // parallelize, optimize runtime + memory usage, tune
 
   // todo: how to pack as gltf (?) (not part of the lib but for my personal use)
