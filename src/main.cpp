@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
   try {
     program.parse_args(argc, argv);
   } catch (const std::exception& err) {
-    printf("%s\n", program.help().str());
+    printf("%s\n", program.help().str().c_str());
     return 1;
   }
 
@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
     Assimp::Importer importer;
     const struct aiScene* scene = importer.ReadFile(
         f,
-        aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType);
+        aiProcess_Triangulate | aiProcess_OptimizeGraph | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType);
 
     const size_t floats_per_vertex = 3;  //(3 * 4);
     const size_t vertex_stride = floats_per_vertex * sizeof(float);
@@ -62,7 +62,9 @@ int main(int argc, char* argv[]) {
     }
 
     printf(
-        "mesh has %i faces (%i indices = %i expected) and %i vertices (%i floats = %i expected)\n",
+        "mesh (%i / %i) has %i faces (%i indices = %i expected) and %i vertices (%i floats = %i expected)\n",
+        0,
+        int(scene->mNumMeshes),
         int(scene->mMeshes[0]->mNumFaces),
         int(indices.size()),
         int(scene->mMeshes[0]->mNumFaces * 3),
@@ -71,6 +73,7 @@ int main(int argc, char* argv[]) {
         int(scene->mMeshes[0]->mNumVertices * floats_per_vertex));
 
     std::cout << vertices.size() << " " << indices.size() << std::endl;
+
 
     pmn::create_dag(indices, vertices, vertex_stride);
   }
