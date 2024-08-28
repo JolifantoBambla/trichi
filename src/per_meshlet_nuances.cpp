@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>  // todo: remove
+#include <optional>
 #include <numeric>
 #include <span>
 #include <unordered_map>
@@ -69,6 +70,8 @@ struct Meshlets {
   std::vector<meshopt_Meshlet> meshlets;
   std::vector<unsigned int> vertices;
   std::vector<unsigned char> triangles;
+  std::vector<meshopt_Bounds> bounds;
+  std::vector<float> errors;
 };
 
 struct Cluster {
@@ -155,7 +158,8 @@ struct Dag {
     size_t vertex_stride,
     size_t max_vertices,
     size_t max_triangles,
-    float cone_weight) {
+    float cone_weight,
+    std::optional<size_t> max_allowed_meshlets = std::nullopt) {
   size_t max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_vertices, max_triangles);
   Meshlets meshlets = {
       .meshlets = std::vector<meshopt_Meshlet>(max_meshlets),
@@ -187,21 +191,22 @@ struct Dag {
   meshlets.vertices.resize(last.vertex_offset + last.vertex_count);
   meshlets.triangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
 
-  const auto start_optimize_meshlets = std::chrono::high_resolution_clock::now();
-  for (const auto& meshlet : meshlets.meshlets) {
-    meshopt_optimizeMeshlet(
-        &meshlets.vertices[meshlet.vertex_offset],
-        &meshlets.triangles[meshlet.triangle_offset],
-        meshlet.triangle_count,
-        meshlet.vertex_count);
-  }
-  const auto end_optimize_meshlets = std::chrono::high_resolution_clock::now();
-  /*
+  if (max_allowed_meshlets.has_value() && meshlets.meshlets.size() <= max_allowed_meshlets.value()) {
+    const auto start_optimize_meshlets = std::chrono::high_resolution_clock::now();
+    for (const auto& meshlet : meshlets.meshlets) {
+      meshopt_optimizeMeshlet(
+          &meshlets.vertices[meshlet.vertex_offset],
+          &meshlets.triangles[meshlet.triangle_offset],
+          meshlet.triangle_count,
+          meshlet.vertex_count);
+    }
+    const auto end_optimize_meshlets = std::chrono::high_resolution_clock::now();
+    /*
   printf(
       "optimize meshlets: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_optimize_meshlets - start_optimize_meshlets).count());
   */
-  // todo: clean meshlets: move triangles with one or less shared vertices to other meshlet
+  }
 
   return std::move(meshlets);
 }
@@ -332,7 +337,6 @@ struct Graph {
 
 // todo: mt-kahypar (https://github.com/kahypar/mt-kahypar) looks very promising for graph partitioning - no static lib though, so needs some work for wasm build
 [[nodiscard]] std::vector<std::vector<size_t>> partition_graph(Graph graph, size_t max_clusters_per_group) {
-  printf("graph\n");
   auto numVertices = static_cast<idx_t>(graph.xadj.size() - 1);
   idx_t numConstraints = 1;  // 1 is the minimum allowed value
   idx_t numParts = std::max(numVertices / static_cast<idx_t>(max_clusters_per_group), 2);
@@ -408,7 +412,7 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<size_t>& gro
   return std::move(group_indices);
 }
 
-[[nodiscard]] std::vector<unsigned int> simplify_group(
+[[nodiscard]] std::pair<std::vector<unsigned int>, float> simplify_group(
     const std::vector<unsigned int>& group_indices,
     const std::vector<float>& vertices,
     size_t vertex_count,
@@ -441,7 +445,7 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<size_t>& gro
       simplification_options,
       &simplification_error));
 
-  return std::move(simplified_indices);
+  return std::make_pair(std::move(simplified_indices), simplification_error);
 }
 
 /*
@@ -516,30 +520,29 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
-  // todo: maybe optimize mesh before generating meshlets? since we don't use scan should be fine without?
+  std::vector<size_t> lod_offsets = {0};
+  Meshlets meshlets =
+      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
 
-  /*
-  std::vector<meshopt_Bounds> bounds{};
-  bounds.reserve(meshlets.meshlets.size());
+  meshlets.errors = std::vector<float>(meshlets.meshlets.size(), 0.0f);
+
+  meshlets.bounds = std::vector<meshopt_Bounds>(meshlets.meshlets.size());
   const auto start_meshlet_bounds = std::chrono::high_resolution_clock::now();
-  for (const auto& meshlet : meshlets.meshlets) {
-    bounds.push_back(meshopt_computeMeshletBounds(
-        &meshlets.vertices[meshlet.vertex_offset],
-        &meshlets.triangles[meshlet.triangle_offset],
-        meshlet.triangle_count,
+  for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
+    meshlets.bounds[i] = meshopt_computeMeshletBounds(
+        &meshlets.vertices[meshlets.meshlets[i].vertex_offset],
+        &meshlets.triangles[meshlets.meshlets[i].triangle_offset],
+        meshlets.meshlets[i].triangle_count,
         vertices.data(),
         vertex_count,
-        vertex_stride));
+        vertex_stride);
   }
   const auto end_meshlet_bounds = std::chrono::high_resolution_clock::now();
+  /*
   printf(
       "meshlet bounds: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_meshlet_bounds - start_meshlet_bounds).count());
   */
-
-  std::vector<size_t> lod_offsets = {0};
-  Meshlets meshlets =
-      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
 
   std::vector<Cluster> clusters(meshlets.meshlets.size());
   for (size_t i = 0; i < clusters.size(); ++i) {
@@ -574,7 +577,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
       const auto& group = groups[i];
       const auto group_indices = merge_group(clusters, groups[i], max_triangles);
 
-      const auto simplified_indices = simplify_group(
+      const auto [simplified_indices, error] = simplify_group(
           group_indices,
           vertices,
           vertex_count,
@@ -586,29 +589,46 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
           simplify_scale,
           lod_scale);
 
-      auto group_meshlets = std::move(build_meshlets(
-          simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight));
-
-      if (group_meshlets.meshlets.size() >= group.size()) {
+      if (simplified_indices.size() >= group_indices.size()) {
         num_not_simplified += groups[i].size();
-
         std::transform(
             group.cbegin(), group.cend(), std::back_inserter(lod_clusters[i]), [&clusters](const size_t cluster_index) {
               return clusters[cluster_index];
             });
         num_next_clusters += group.size();
       } else {
-        num_new_meshlets += group_meshlets.meshlets.size();
-        num_new_vertices += group_meshlets.vertices.size();
-        num_new_triangles += group_meshlets.triangles.size();
-        num_next_clusters += group_meshlets.meshlets.size();
+        auto group_meshlets = std::move(build_meshlets(
+            simplified_indices,
+            vertices,
+            vertex_count,
+            vertex_stride,
+            max_vertices,
+            max_triangles,
+            cone_weight,
+            group.size() - 1));
 
-        lod_meshlets[i] = std::move(group_meshlets);
-        for (size_t cluster_index = 0; cluster_index < lod_meshlets[i].meshlets.size(); ++cluster_index) {
-          lod_clusters[i].emplace_back(Cluster{
-              .index = cluster_index,
-              .buffers = &meshlets,
-          });
+        if (group_meshlets.meshlets.size() >= group.size()) {
+          num_not_simplified += groups[i].size();
+          std::transform(
+              group.cbegin(),
+              group.cend(),
+              std::back_inserter(lod_clusters[i]),
+              [&clusters](const size_t cluster_index) { return clusters[cluster_index]; });
+          num_next_clusters += group.size();
+        } else {
+          num_new_meshlets += group_meshlets.meshlets.size();
+          num_new_vertices += group_meshlets.vertices.size();
+          num_new_triangles += group_meshlets.triangles.size();
+          num_next_clusters += group_meshlets.meshlets.size();
+
+          lod_meshlets[i] = std::move(group_meshlets);
+          for (size_t cluster_index = 0; cluster_index < lod_meshlets[i].meshlets.size(); ++cluster_index) {
+            // todo: each cluster is a parent of each cluster in the group
+            lod_clusters[i].emplace_back(Cluster{
+                .index = cluster_index,
+                .buffers = &meshlets,
+            });
+          }
         }
       }
     }
@@ -620,46 +640,49 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     */
 
     std::vector<Cluster> next_clusters{};
-    next_clusters.reserve(num_next_clusters);
+    // merge meshlets & prepare next iteration's clusters
+    {
+      next_clusters.reserve(num_next_clusters);
 
-    meshlets.meshlets.reserve(meshlets.meshlets.size() + num_new_meshlets);
-    meshlets.vertices.reserve(meshlets.vertices.size() + num_new_vertices);
-    meshlets.triangles.reserve(meshlets.triangles.size() + num_new_triangles);
+      meshlets.meshlets.reserve(meshlets.meshlets.size() + num_new_meshlets);
+      meshlets.vertices.reserve(meshlets.vertices.size() + num_new_vertices);
+      meshlets.triangles.reserve(meshlets.triangles.size() + num_new_triangles);
 
-    for (size_t i = 0; i < groups.size(); ++i) {
-      if (!lod_meshlets[i].meshlets.empty()) {
-        for (size_t cluster_index = 0; cluster_index < lod_clusters[i].size(); ++cluster_index) {
-          lod_clusters[i][cluster_index].index += meshlets.meshlets.size();
-          lod_meshlets[i].meshlets[cluster_index].vertex_offset += meshlets.vertices.size();
-          lod_meshlets[i].meshlets[cluster_index].triangle_offset += meshlets.triangles.size();
+      for (size_t i = 0; i < groups.size(); ++i) {
+        if (!lod_meshlets[i].meshlets.empty()) {
+          for (size_t cluster_index = 0; cluster_index < lod_clusters[i].size(); ++cluster_index) {
+            lod_clusters[i][cluster_index].index += meshlets.meshlets.size();
+            lod_meshlets[i].meshlets[cluster_index].vertex_offset += meshlets.vertices.size();
+            lod_meshlets[i].meshlets[cluster_index].triangle_offset += meshlets.triangles.size();
+          }
+          meshlets.meshlets.insert(
+              meshlets.meshlets.end(),
+              std::make_move_iterator(lod_meshlets[i].meshlets.begin()),
+              std::make_move_iterator(lod_meshlets[i].meshlets.end()));
+          meshlets.vertices.insert(
+              meshlets.vertices.end(),
+              std::make_move_iterator(lod_meshlets[i].vertices.begin()),
+              std::make_move_iterator(lod_meshlets[i].vertices.end()));
+          meshlets.triangles.insert(
+              meshlets.triangles.end(),
+              std::make_move_iterator(lod_meshlets[i].triangles.begin()),
+              std::make_move_iterator(lod_meshlets[i].triangles.end()));
         }
-        meshlets.meshlets.insert(
-            meshlets.meshlets.end(),
-            std::make_move_iterator(lod_meshlets[i].meshlets.begin()),
-            std::make_move_iterator(lod_meshlets[i].meshlets.end()));
-        meshlets.vertices.insert(
-            meshlets.vertices.end(),
-            std::make_move_iterator(lod_meshlets[i].vertices.begin()),
-            std::make_move_iterator(lod_meshlets[i].vertices.end()));
-        meshlets.triangles.insert(
-            meshlets.triangles.end(),
-            std::make_move_iterator(lod_meshlets[i].triangles.begin()),
-            std::make_move_iterator(lod_meshlets[i].triangles.end()));
+        next_clusters.insert(
+            next_clusters.end(),
+            std::make_move_iterator(lod_clusters[i].begin()),
+            std::make_move_iterator(lod_clusters[i].end()));
       }
-      next_clusters.insert(
-          next_clusters.end(),
-          std::make_move_iterator(lod_clusters[i].begin()),
-          std::make_move_iterator(lod_clusters[i].end()));
-    }
 
-    printf(
-        "num meshlets: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
-        int(level),
-        int(num_new_meshlets),
-        int(level - 1),
-        int(clusters.size()),
-        int(clusters.size()) / 2,
-        int(num_not_simplified));
+      printf(
+          "num meshlets: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
+          int(level),
+          int(num_new_meshlets),
+          int(level - 1),
+          int(clusters.size()),
+          int(clusters.size()) / 2,
+          int(num_not_simplified));
+    }
 
     // todo:
     // insert into dag

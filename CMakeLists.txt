@@ -16,6 +16,7 @@ CPMAddPackage(
     VERSION 4.1.0)
 add_library(BS_thread_pool INTERFACE)
 target_include_directories(BS_thread_pool INTERFACE ${BS_thread_pool_SOURCE_DIR}/include)
+CPMAddPackage("gh:p-ranav/argparse#v3.0")
 
 
 # lib
@@ -35,4 +36,5 @@ add_executable(example
         src/main.cpp)
 target_link_libraries(example
         per_meshlet_nuances
-        assimp)
+        assimp
+        argparse::argparse)
