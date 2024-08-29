@@ -3,7 +3,7 @@ project(per_meshlet_nuances)
 
 set(CMAKE_CXX_STANDARD 20)
 
-option(PMN_PARALLEL "Build the library with parallelization enabled." ON)
+option(PMN_PARALLEL "Build the library with parallelization enabled." OFF)
 
 # add dependencies
 include(cmake/CPM.cmake)

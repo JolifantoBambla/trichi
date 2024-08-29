@@ -248,6 +248,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   }
 
   for (size_t level = 1; level < max_lod_count; ++level) {
+    const auto lod_start_time = std::chrono::high_resolution_clock::now();
     if (clusters.size() <= 1) {
       break;
     }
@@ -399,6 +400,16 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
           int(clusters.size()),
           int(clusters.size()) / 2,
           int(num_not_simplified));
+    }
+
+    const auto lod_end_time = std::chrono::high_resolution_clock::now();
+    printf(
+        "lod %i: took %ld ms\n",
+        int(level),
+        std::chrono::duration_cast<std::chrono::milliseconds>(lod_end_time - lod_start_time).count());
+
+    if (num_new_meshlets == 0) {
+      break;
     }
 
     // todo:
