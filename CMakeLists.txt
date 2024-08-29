@@ -3,12 +3,14 @@ project(per_meshlet_nuances)
 
 set(CMAKE_CXX_STANDARD 20)
 
+option(PMN_PARALLEL "Build the library with parallelization enabled." ON)
+
 # add dependencies
 include(cmake/CPM.cmake)
 
 CPMAddPackage("gh:zeux/meshoptimizer#v0.21")
 include(cmake/metis.cmake)
-CPMAddPackage("gh:nmwsharp/geometry-central#v0.1.0")
+CPMAddPackage("gh:nmwsharp/geometry-central#v0.1.0") # todo: remove
 CPMAddPackage("gh:assimp/assimp#v5.4.2")
 CPMAddPackage(
         NAME BS_thread_pool
@@ -16,8 +18,7 @@ CPMAddPackage(
         VERSION 4.1.0)
 add_library(BS_thread_pool INTERFACE)
 target_include_directories(BS_thread_pool INTERFACE ${BS_thread_pool_SOURCE_DIR}/include)
-CPMAddPackage("gh:p-ranav/argparse#v3.0")
-
+CPMAddPackage("gh:p-ranav/argparse#v3.0") # todo: move to own subdirectory with example target
 
 # lib
 add_library(per_meshlet_nuances
@@ -36,7 +37,12 @@ target_link_libraries(per_meshlet_nuances
         BS_thread_pool
 )
 
+if (PMN_PARALLEL)
+    target_compile_definitions(per_meshlet_nuances PRIVATE PMN_PARALLEL)
+endif (PMN_PARALLEL)
+
 # example
+# todo: move to own subdirectory
 add_executable(example
         src/main.cpp)
 target_link_libraries(example

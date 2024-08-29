@@ -8,8 +8,6 @@
 #include <algorithm>  // std::set_intersection
 #include <cstdint>    // uint64_t
 
-#define PMN_PARALLEL
-
 #ifdef PMN_PARALLEL
 #include "BS_thread_pool.hpp"
 #endif
