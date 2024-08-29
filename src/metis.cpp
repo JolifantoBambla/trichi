@@ -2,6 +2,7 @@
 // Created by lukas on 28.08.24.
 //
 
+#include <array>
 #include <atomic>
 #include <chrono>
 
@@ -17,8 +18,8 @@ struct Graph {
   bool is_contiguous;
 };
 
-[[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters) {
-  const auto boundaries = extract_boundaries(clusters);
+[[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters, LoopRunner& loop_runner) {
+  const auto boundaries = extract_boundaries(clusters, loop_runner);
 
   // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
   std::atomic<size_t> no_neighbors_count = 0;
@@ -30,6 +31,7 @@ struct Graph {
   std::vector<idx_t> adjacency{};
   std::vector<idx_t> adjwght{};
 
+  // todo: parallelize - either brute force set intersection n^2 but parallel or split into a parallel set intersection and a sequential resolving loop (or a parallel exclusive sum and a parallel resolving loop - could be overkill who knows)
   for (size_t i = 0; i < boundaries.size(); ++i) {
     const auto& boundary = boundaries[i];
 
@@ -154,7 +156,8 @@ struct Graph {
 
 [[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
     const std::vector<Cluster>& clusters,
-    size_t max_clusters_per_group) {
-  return std::move(partition_graph(std::move(build_cluster_graph(clusters)), max_clusters_per_group));
+    size_t max_clusters_per_group,
+    LoopRunner& loop_runner) {
+  return std::move(partition_graph(std::move(build_cluster_graph(clusters, loop_runner)), max_clusters_per_group));
 }
 }  // namespace pmn

@@ -46,6 +46,12 @@ void extract_boundary(const Cluster& cluster, std::vector<uint64_t>& boundary) {
   std::sort(boundary.begin(), boundary.end());
 }
 
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters, LoopRunner& loop_runner) {
+  std::vector<std::vector<uint64_t>> boundaries(clusters.size());
+  loop_runner.loop(0, clusters.size(), [&clusters, &boundaries](const size_t i) { extract_boundary(clusters[i], boundaries[i]); });
+  return std::move(boundaries);
+}
+
 void init_dag_node(
     const Cluster& cluster,
     DagNode& dagNode,

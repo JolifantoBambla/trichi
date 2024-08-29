@@ -5,11 +5,10 @@
 #ifndef PER_MESHLET_NUANCES_IMPL_HPP
 #define PER_MESHLET_NUANCES_IMPL_HPP
 
-#include "meshoptimizer.h"
+#include <unordered_map>
+#include <vector>
 
-#ifdef PMN_PARALLEL
-#include "BS_thread_pool.hpp"
-#endif
+#include "meshoptimizer.h"
 
 #include "util.hpp"
 
@@ -58,17 +57,12 @@ void init_dag_node(
     size_t level,
     float error);
 
-#ifdef PMN_PARALLEL
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(
-    const std::vector<Cluster>& clusters,
-    BS::thread_pool& threadPool);
-#else
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters);
-#endif
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters, LoopRunner& loop_runner);
 
 [[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
     const std::vector<Cluster>& clusters,
-    size_t max_clusters_per_group);
+    size_t max_clusters_per_group,
+    LoopRunner& loop_runner);
 }  // namespace pmn
 
 #endif  //PER_MESHLET_NUANCES_IMPL_HPP

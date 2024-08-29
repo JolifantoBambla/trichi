@@ -9,6 +9,7 @@
 #include <iostream>  // todo: remove
 #include <numeric>
 #include <optional>
+#include <thread>
 
 #include "meshoptimizer.h"
 #include "metis.h"
@@ -227,6 +228,8 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   const float min_target_error = 1e-2f;
   const float max_target_error = 1.0f;
 
+  LoopRunner loop_runner{std::thread::hardware_concurrency()};
+
   float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
   std::vector<size_t> lod_offsets = {0};
@@ -254,7 +257,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
     const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
     const auto groups =
-        is_last ? build_final_cluster_group(clusters.size()) : group_clusters(clusters, max_num_clusters_per_group);
+        is_last ? build_final_cluster_group(clusters.size()) : group_clusters(clusters, max_num_clusters_per_group, loop_runner);
 
     std::atomic_size_t num_new_meshlets = 0;
     std::atomic_size_t num_new_vertices = 0;
@@ -265,7 +268,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     std::vector<MeshletsBuffers> lod_meshlets(groups.size());
     std::vector<std::vector<Cluster>> lod_clusters(groups.size());
     std::vector<DagNode> lod_dag_nodes(groups.size() * 4);
-    for (size_t i = 0; i < groups.size(); ++i) {
+    loop_runner.loop(0, groups.size(), [&](const size_t i) {
       const auto& group = groups[i];
       const auto group_indices = merge_group(clusters, groups[i], max_triangles);
 
@@ -338,7 +341,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
             });
         num_next_clusters += group.size();
       }
-    }
+    });
 
     std::vector<Cluster> next_clusters{};
     // merge meshlets & prepare next iteration's clusters

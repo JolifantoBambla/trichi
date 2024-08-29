@@ -23,10 +23,12 @@ CPMAddPackage("gh:p-ranav/argparse#v3.0")
 add_library(per_meshlet_nuances
         src/per_meshlet_nuances.cpp
         src/common.cpp
-        src/sequential.cpp
         src/metis.cpp)
 target_include_directories(per_meshlet_nuances PUBLIC
         include)
+target_include_directories(per_meshlet_nuances PRIVATE
+        src
+)
 target_link_libraries(per_meshlet_nuances
         meshoptimizer
         libmetis
