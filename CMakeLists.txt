@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
-project(per_meshlet_nuances)
+project(per_meshlet_nuances
+        VERSION 0.1.0
+        DESCRIPTION "Creates a hierarchical triangle cluster DAG"
+        HOMEPAGE_URL "https://jolifantobambla.github.io/per-meshlet-nuances/"
+        LANGUAGES C CXX
+)
 
 set(CMAKE_CXX_STANDARD 20)
 

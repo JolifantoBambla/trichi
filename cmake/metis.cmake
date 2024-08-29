@@ -4,11 +4,6 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Debug or Release")
 endif()
 
-project(metis
-        LANGUAGES C
-        VERSION 5.2.1
-)
-
 CPMAddPackage(
         NAME gklib
         GIT_REPOSITORY git@github.com:KarypisLab/GKlib.git
