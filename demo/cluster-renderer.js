@@ -57,6 +57,9 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
         vertex: {
             module: meshletModule,
             buffers: [],
+            constants: {
+                VERTEX_STRIDE_FLOATS: mesh.strideFloats,
+            },
         },
         primitive: {
             topology: 'triangle-list',
@@ -65,9 +68,6 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
         fragment: {
             module: meshletModule,
             targets: [{format: colorFormat}],
-            constants: {
-                VERTEX_STRIDE_FLOATS: mesh.strideFloats,
-            },
         },
         depthStencil: {
             depthWriteEnabled: true,
