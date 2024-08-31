@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshlet Playground</title>
+</head>
+<body>
+<div class="container">
+    <canvas id="canvas" style="width: 99%; height: 99%; position: absolute"></canvas>
+    <div id="ui" style="position: absolute; right: 0; z-index: 1;"></div>
+</div>
+
+<script src="https://wgpu-matrix.org/dist/3.x/wgpu-matrix.min.js"></script>
+
+<script type="module">
+    import {vec3n, mat4n, quatn} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
+    import {FPSCameraController} from './fps-camera.js';
+    import {makeUi} from './ui.js';
+    import {webgpuNotSupported} from './util.js';
+    import {makeClusterRenderer} from './cluster-renderer.js';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const useTimestampQuery = urlParams.has('timestamp_query');
+
+    async function main() {
+        if (!('gpu' in navigator)) {
+            webgpuNotSupported();
+            return;
+        }
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            webgpuNotSupported();
+            return;
+        }
+        console.info('Available adapter features', [...adapter.features]);
+
+        const deviceFeatures = [];
+        if (useTimestampQuery && adapter.features.has('timestamp-query')) {
+            deviceFeatures.push('timestamp-query');
+        }
+
+        const device = await adapter.requestDevice({requiredFeatures: deviceFeatures});
+        console.info('Enabled device features', [...device.features]);
+
+        const canvas = document.querySelector('canvas');
+        const resolution = [canvas.clientWidth, canvas.clientHeight].map(s => s * window.devicePixelRatio);
+        canvas.width = resolution[0];
+        canvas.height = resolution[1];
+
+        if (device.features.has('timestamp-query')) {
+            // todo: timings
+        }
+
+        const context = canvas.getContext('webgpu');
+        const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({
+            device,
+            format: presentationFormat,
+        });
+
+        const cameraController = new FPSCameraController(canvas);
+
+        const projection = mat4n.perspectiveReverseZ(
+            45.0 * (Math.PI / 180.0),
+            resolution[0] / resolution[1],
+            1.0,
+        );
+
+        const backBuffer = device.createTexture({
+            size: resolution,
+            format: 'rgba16float',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        const backBufferView = backBuffer.createView();
+
+        const depthBuffer = device.createTexture({
+            size: resolution,
+            format: 'depth24plus',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        const depthBufferView = depthBuffer.createView();
+
+        function makePipeline() {
+            const module = device.createShaderModule({
+                code: `
+                    @group(0) @binding(0) var backbuffer: texture_2d<f32>;
+
+                    @vertex
+                    fn vertex(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        return vec4(vec2(f32((vertex_index << 1) & 2), f32(vertex_index & 2)) * 2 - 1, 0, 1);
+                    }
+
+                    fn coords_in_rect(coords: vec2<u32>, rect_min: vec2<u32>, rect_max: vec2<u32>) -> bool {
+                        return all(coords >= rect_min) && all(coords < rect_max);
+                    }
+
+                    @fragment
+                    fn fragment(@builtin(position) coord: vec4<f32>) -> @location(0) vec4<f32> {
+                        let texture_coords = vec2<u32>(floor(coord.xy));
+
+                        let backbuffer_size = textureDimensions(backbuffer, 0).xy;
+
+                        if coords_in_rect(texture_coords, vec2<u32>(), backbuffer_size) {
+                            let rgb = textureLoad(backbuffer, texture_coords, 0).rgb;
+                            return vec4(rgb, 1.0);
+                        } else {
+                            return vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                    }
+                    `,
+            });
+            return device.createRenderPipeline({
+                layout: 'auto',
+                vertex: {
+                    module,
+                    entryPoint: 'vertex',
+                },
+                fragment: {
+                    module,
+                    entryPoint: 'fragment',
+                    targets: [{format: presentationFormat}],
+                },
+            });
+        }
+
+        const presentPipeline = makePipeline();
+        const bindGroup = device.createBindGroup({
+            label: 'b1',
+            layout: presentPipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: backBufferView,
+                },
+            ],
+        });
+
+        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, true);
+
+        const resolutionDependentStuff = {
+            projection,
+            backBuffer,
+            backBufferView,
+            depthBuffer,
+            depthBufferView,
+            bindGroup,
+        };
+
+        let resizeInProgress = false;
+        const handleResize = _ => {
+            resolution[0] = canvas.clientWidth * window.devicePixelRatio;
+            resolution[1] = canvas.clientHeight * window.devicePixelRatio;
+
+            canvas.width = resolution[0];
+            canvas.height = resolution[1];
+
+            resolutionDependentStuff.projection = mat4n.perspectiveReverseZ(
+                45.0 * (Math.PI / 180.0),
+                resolution[0] / resolution[1],
+                1.0,
+            );
+            resolutionDependentStuff.backBuffer = device.createTexture({
+                size: resolution,
+                format: 'rgba16float',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+            resolutionDependentStuff.backBufferView = resolutionDependentStuff.backBuffer.createView();
+            resolutionDependentStuff.depthBuffer = device.createTexture({
+                size: resolution,
+                format: 'depth24plus',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+            resolutionDependentStuff.depthBufferView = resolutionDependentStuff.depthBuffer.createView();
+            resolutionDependentStuff.bindGroup = device.createBindGroup({
+                layout: presentPipeline.getBindGroupLayout(0),
+                entries: [
+                    {
+                        binding: 0,
+                        resource: resolutionDependentStuff.skyRenderTarget.createView(),
+                    },
+                ],
+            });
+
+            resizeInProgress = false;
+        };
+
+        let timeout = false;
+        window.addEventListener('resize', _ => {
+            resizeInProgress = true;
+            clearTimeout(timeout);
+            timeout = setTimeout(handleResize, 250);
+        });
+
+        const params = makeUi(clusterRenderer.numLods);
+
+        let lastTime = new Date();
+        let frameId = 0;
+        const render = () => {
+            const now = new Date();
+            const dt = (now - lastTime);
+            lastTime = now;
+
+            ++frameId;
+
+            if (resizeInProgress) {
+                setTimeout(render, 250);
+                return;
+            }
+
+            cameraController.update(dt);
+
+            const encoder = device.createCommandEncoder();
+
+            const cameraView = cameraController.view;
+
+            const config = {
+                camera: {
+                    position: cameraController.position,
+                    inverseView: mat4n.inverse(cameraView),
+                    inverseProjection: mat4n.inverse(resolutionDependentStuff.projection),
+                },
+                frameId,
+            };
+
+            clusterRenderer.update({view: cameraView, projection}, {instances: [mat4n.identity()]});
+
+            const geometryPass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: resolutionDependentStuff.backBufferView,
+                    clearValue: [0, 0, 0, 1],
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+                depthStencilAttachment: {
+                    view: resolutionDependentStuff.depthBufferView,
+                    depthClearValue: 0.0, // reverse z
+                    depthLoadOp: 'clear',
+                    depthStoreOp: 'store',
+                },
+            });
+            clusterRenderer.encode(geometryPass, params.renderSettings.lod);
+            geometryPass.end();
+
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    clearValue: [0, 0, 0, 1],
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+            });
+            pass.setPipeline(presentPipeline);
+            pass.setBindGroup(0, resolutionDependentStuff.bindGroup);
+            pass.draw(3);
+            pass.end();
+
+            device.queue.submit([encoder.finish()]);
+
+            requestAnimationFrame(render);
+        };
+        render();
+    }
+
+    main();
+</script>
+</body>
+</html>

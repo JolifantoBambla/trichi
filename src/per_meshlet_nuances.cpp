@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>  // todo: remove
 #include <numeric>
 #include <optional>
@@ -257,8 +258,8 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     bool is_last = clusters.size() <= max_num_clusters_per_group;
 
     const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
-    const auto groups =
-        is_last ? build_final_cluster_group(clusters.size()) : group_clusters(clusters, max_num_clusters_per_group, loop_runner);
+    const auto groups = is_last ? build_final_cluster_group(clusters.size())
+                                : group_clusters(clusters, max_num_clusters_per_group, loop_runner);
 
     std::atomic_size_t num_new_meshlets = 0;
     std::atomic_size_t num_new_vertices = 0;
@@ -419,7 +420,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   }
 
   const auto root = dagNodes.back();
-  
+
   // parallelize, optimize runtime + memory usage, tune
 
   // todo: how to pack as gltf (?) (not part of the lib but for my personal use)
@@ -431,6 +432,97 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   printf(
       "create dag: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count());
+
+  // todo: for now to quickly have a demo
+  //  - output all meshlet data as js file (concatenate meshlets, vertices, triangles)
+  //  - output vertices in js file
+  //  - output dag data in js file
+
+  std::vector<size_t> offsets{};
+  lod_offsets.reserve(lods.size());
+  size_t meshlets_offset = 0;
+  size_t vertices_offset = 0;
+  size_t triangles_offset = 0;
+  MeshletsBuffers concatenated{};
+  for (size_t i = 0; i < lods.size(); ++i) {
+    offsets.push_back(meshlets_offset);
+    if (i == 0) {
+      concatenated.meshlets.insert(concatenated.meshlets.cend(), lods[i].meshlets.cbegin(), lods[i].meshlets.cbegin());
+    } else {
+      std::transform(
+          lods[i].meshlets.cbegin(), lods[i].meshlets.cend(), std::back_inserter(concatenated.meshlets), [&](auto m) {
+            m.vertex_offset += vertices_offset;
+            m.triangle_offset += triangles_offset;
+            return m;
+          });
+    }
+    concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cbegin());
+    concatenated.triangles.insert(
+        concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cbegin());
+    meshlets_offset += concatenated.meshlets.size();
+    vertices_offset += concatenated.vertices.size();
+    triangles_offset += concatenated.triangles.size();
+  }
+
+  std::ofstream js_stream("/home/lukas/Projects/per-meshlet-nuances/demo/demo-mesh.js");
+  js_stream << "export const mesh = {\n";
+  js_stream << "  vertices: new Float32Array([";
+  for (size_t i = 0; i < vertices.size(); ++i) {
+    js_stream << vertices[i];
+    if (i != vertices.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
+
+  js_stream << "  strideFloats: " << vertex_stride / sizeof(float) << ",\n";
+
+  js_stream << "  meshlets: new Uint32Array([";
+  for (size_t i = 0; i < concatenated.meshlets.size(); ++i) {
+    js_stream << concatenated.meshlets[i].vertex_offset << ",";
+    js_stream << concatenated.meshlets[i].triangle_offset << ",";
+    js_stream << concatenated.meshlets[i].vertex_count << ",";
+    js_stream << concatenated.meshlets[i].triangle_count << ",";
+    if (i != concatenated.meshlets.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
+
+  js_stream << "  meshletVertices: new Uint32Array([";
+  for (size_t i = 0; i < concatenated.vertices.size(); ++i) {
+    js_stream << concatenated.vertices[i];
+    if (i != concatenated.vertices.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
+
+  js_stream << "  meshletTriangles: new Uint32Array([";
+  for (size_t i = 0; i < concatenated.triangles.size(); ++i) {
+    js_stream << concatenated.triangles[i];
+    if (i != concatenated.triangles.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
+
+  js_stream << "  lods: new Uint32Array([";
+  for (size_t i = 0; i < offsets.size(); ++i) {
+    js_stream << offsets[i];
+    if (i != offsets.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
+
+  js_stream << "  numMeshlets: " << offsets.back() << ",\n";
+
+  js_stream << "  maxClusterTriangles: " << max_triangles << ",\n";
+
+  // todo: dag data
+
+  js_stream << "}" << std::endl;
 }
 
 }  // namespace pmn
