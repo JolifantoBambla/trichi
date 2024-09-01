@@ -63,7 +63,7 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
         },
         primitive: {
             topology: 'triangle-list',
-            //cullMode: 'back',
+            cullMode: 'back',
         },
         fragment: {
             module: meshletModule,
@@ -135,20 +135,6 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                 mesh.lods[i] + Math.floor(c % numLodClusters(i)),
             ];
         }).flat()));
-        if (i == 0) {
-            console.log(new Uint32Array(Array(numLodClusters(i) * numInstances).fill(0).map((_, c) => {
-                if (Math.floor(c / numLodClusters(i)) !== 0) {
-                    throw new Error('fuck');
-                }
-                if (mesh.lods[i] + Math.floor(c % numLodClusters(i)) !== c) {
-                    throw new Error('fuck');
-                }
-                return [
-                    Math.floor(c / numLodClusters(i)),
-                    mesh.lods[i] + Math.floor(c % numLodClusters(i)),
-                ];
-            }).flat()));
-        }
         lodBuffer.unmap();
         lodBuffers.push(lodBuffer);
     }
@@ -166,7 +152,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     return {
         update({view, projection}, {instances}) {
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
-            device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances]));
+            device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances.flat()]));
         },
         encode(passEncoder, lod = 0) {
             lod = Math.min(Math.max(lod, 0), mesh.lods.length - 1);
@@ -174,7 +160,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
             passEncoder.setBindGroup(0, uniformsBindGroup);
             passEncoder.setBindGroup(1, meshletBindGroup);
             passEncoder.setBindGroup(2, lodBindGroups[lod]);
-            passEncoder.draw(mesh.maxClusterTriangles * 3, numLodClusters(lod));
+            passEncoder.draw(mesh.maxClusterTriangles * 3, numLodClusters(lod) * numInstances);
         },
         aabb: mesh.aabb,
         numLods: mesh.lods.length,

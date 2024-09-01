@@ -83,7 +83,7 @@ fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_
 @fragment
 fn fragment(frag_in: VertexOut) -> @location(0) vec4<f32> {
     let albedo = frag_in.color;
-    return vec4(1.0);//return vec4(saturate(albedo), 1.0);
+    return vec4(saturate(albedo), 1.0);
 }
 
 `;

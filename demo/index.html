@@ -115,11 +115,9 @@
                 layout: 'auto',
                 vertex: {
                     module,
-                    entryPoint: 'vertex',
                 },
                 fragment: {
                     module,
-                    entryPoint: 'fragment',
                     targets: [{format: presentationFormat}],
                 },
             });
@@ -139,7 +137,7 @@
 
         const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, true);
         const clusterScale = Array(3).fill(0).map((_, i) => {
-            return (1.0 / (clusterRenderer.aabb.max[i] - clusterRenderer.aabb.min[i])) * 10.0;
+            return (1.0 / (clusterRenderer.aabb.max[i] - clusterRenderer.aabb.min[i]));
         });
 
         const resolutionDependentStuff = {
@@ -218,7 +216,7 @@
             clusterRenderer.update({
                 view: cameraView,
                 projection: resolutionDependentStuff.projection
-            }, {instances: [mat4n.identity()]});//[mat4n.scaling(clusterScale)]});
+            }, {instances: [mat4n.scaling(clusterScale)]});
 
             const encoder = device.createCommandEncoder();
 
