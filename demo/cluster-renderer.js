@@ -1,14 +1,14 @@
-import {mesh} from './demo-mesh.js';
+import {mesh} from './test-mesh.js'; //'./demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
 
 function makeVertexBuffer(device) {
     const vertexBuffer = device.createBuffer({
         label: 'vertices',
-        size: mesh.vertices.length * Float32Array.BYTES_PER_ELEMENT,
+        size: mesh.vertices.byteLength,
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
-    new Float32Array(vertexBuffer.getMappedRange()).set(mesh.vertices);
+    (new Float32Array(vertexBuffer.getMappedRange())).set(mesh.vertices);
     vertexBuffer.unmap();
     return vertexBuffer;
 }
@@ -28,13 +28,13 @@ function makeMeshletBuffers(device) {
     });
     const meshletTrianglesBuffer = device.createBuffer({
         label: 'meshlet triangles',
-        size: Uint32Array.BYTES_PER_ELEMENT * mesh.meshletTriangles.length,
+        size: mesh.meshletTriangles.byteLength,
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
-    new Uint32Array(meshletsBuffer.getMappedRange()).set(mesh.meshlets);
-    new Uint32Array(meshletVerticesBuffer.getMappedRange()).set(mesh.meshletVertices);
-    new Uint32Array(meshletTrianglesBuffer.getMappedRange()).set(new Uint32Array(mesh.meshletTriangles));
+    (new Uint32Array(meshletsBuffer.getMappedRange())).set(mesh.meshlets);
+    (new Uint32Array(meshletVerticesBuffer.getMappedRange())).set(mesh.meshletVertices);
+    (new Uint32Array(meshletTrianglesBuffer.getMappedRange())).set(mesh.meshletTriangles);
     meshletsBuffer.unmap();
     meshletVerticesBuffer.unmap();
     meshletTrianglesBuffer.unmap();
@@ -63,7 +63,7 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
         },
         primitive: {
             topology: 'triangle-list',
-            cullMode: 'back',
+            //cullMode: 'back',
         },
         fragment: {
             module: meshletModule,
@@ -76,15 +76,15 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
         },
     });
 
-    return {
-        pipeline,
-    }
+    return pipeline;
+}
+
+function numLodClusters(lod) {
+    return lod < (mesh.lods.length - 1) ? mesh.lods[lod + 1] - mesh.lods[lod] : mesh.numMeshlets - mesh.lods[lod];
 }
 
 export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFormat = 'depth24plus', reverseZ = true) {
-    const {
-        pipeline,
-    } = makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ);
+    const pipeline = makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ);
 
     const cameraBuffer = device.createBuffer({
         label: 'camera',
@@ -92,6 +92,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     const uniformsBindGroup = device.createBindGroup({
+        label: 'uniforms',
         layout: pipeline.getBindGroupLayout(0),
         entries: [
             {binding: 0, resource: {buffer: cameraBuffer}},
@@ -109,6 +110,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     const vertexBuffer = makeVertexBuffer(device);
 
     const meshletBindGroup = device.createBindGroup({
+        label: 'mesh & instance data',
         layout: pipeline.getBindGroupLayout(1),
         entries: [
             {binding: 0, resource: {buffer: instancesBuffer}},
@@ -121,19 +123,32 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
 
     const lodBuffers = [];
     for (let i = 0; i < mesh.lods.length; ++i) {
-        const numLodClusters = i < mesh.lods.length - 1 ? mesh.lods[i + 1] - mesh.lods[i] : mesh.numMeshlets - mesh.lods[i];
         const lodBuffer = device.createBuffer({
             label: `lod ${i} instances`,
-            size: Uint32Array.BYTES_PER_ELEMENT * 2 * numLodClusters,
+            size: Uint32Array.BYTES_PER_ELEMENT * 2 * numLodClusters(i) * numInstances,
             usage: GPUBufferUsage.STORAGE,
             mappedAtCreation: true,
         });
-        new Uint32Array(lodBuffer.getMappedRange()).set(new Uint32Array(Array(numLodClusters * numInstances).map((_, c) => {
+        (new Uint32Array(lodBuffer.getMappedRange())).set(new Uint32Array(Array(numLodClusters(i) * numInstances).fill(0).map((_, c) => {
             return [
-                Math.floor(c / numLodClusters),
-                mesh.lods[i] + Math.floor(c % numLodClusters),
+                Math.floor(c / numLodClusters(i)),
+                mesh.lods[i] + Math.floor(c % numLodClusters(i)),
             ];
         }).flat()));
+        if (i == 0) {
+            console.log(new Uint32Array(Array(numLodClusters(i) * numInstances).fill(0).map((_, c) => {
+                if (Math.floor(c / numLodClusters(i)) !== 0) {
+                    throw new Error('fuck');
+                }
+                if (mesh.lods[i] + Math.floor(c % numLodClusters(i)) !== c) {
+                    throw new Error('fuck');
+                }
+                return [
+                    Math.floor(c / numLodClusters(i)),
+                    mesh.lods[i] + Math.floor(c % numLodClusters(i)),
+                ];
+            }).flat()));
+        }
         lodBuffer.unmap();
         lodBuffers.push(lodBuffer);
     }
@@ -146,6 +161,8 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         });
     });
 
+    console.log(numLodClusters(0), numInstances, mesh.meshlets.length / 4, mesh.numMeshlets, mesh.strideFloats, mesh.vertices.length / mesh.strideFloats);
+
     return {
         update({view, projection}, {instances}) {
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
@@ -157,8 +174,9 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
             passEncoder.setBindGroup(0, uniformsBindGroup);
             passEncoder.setBindGroup(1, meshletBindGroup);
             passEncoder.setBindGroup(2, lodBindGroups[lod]);
-            passEncoder.draw(mesh.maxClusterTriangles * 3, lod < mesh.lods.length - 1 ? mesh.lods[lod + 1] - mesh.lods[lod] : mesh.numMeshlets - mesh.lods[lod]);
+            passEncoder.draw(mesh.maxClusterTriangles * 3, numLodClusters(lod));
         },
+        aabb: mesh.aabb,
         numLods: mesh.lods.length,
         numInstances,
     };

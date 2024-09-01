@@ -111,6 +111,7 @@
                     `,
             });
             return device.createRenderPipeline({
+                label: 'present',
                 layout: 'auto',
                 vertex: {
                     module,
@@ -125,8 +126,8 @@
         }
 
         const presentPipeline = makePipeline();
-        const bindGroup = device.createBindGroup({
-            label: 'b1',
+        const presentBindGroup = device.createBindGroup({
+            label: 'present',
             layout: presentPipeline.getBindGroupLayout(0),
             entries: [
                 {
@@ -137,6 +138,9 @@
         });
 
         const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, true);
+        const clusterScale = Array(3).fill(0).map((_, i) => {
+            return (1.0 / (clusterRenderer.aabb.max[i] - clusterRenderer.aabb.min[i])) * 10.0;
+        });
 
         const resolutionDependentStuff = {
             projection,
@@ -144,7 +148,7 @@
             backBufferView,
             depthBuffer,
             depthBufferView,
-            bindGroup,
+            presentBindGroup,
         };
 
         let resizeInProgress = false;
@@ -172,12 +176,12 @@
                 usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
             });
             resolutionDependentStuff.depthBufferView = resolutionDependentStuff.depthBuffer.createView();
-            resolutionDependentStuff.bindGroup = device.createBindGroup({
+            resolutionDependentStuff.presentBindGroup = device.createBindGroup({
                 layout: presentPipeline.getBindGroupLayout(0),
                 entries: [
                     {
                         binding: 0,
-                        resource: resolutionDependentStuff.skyRenderTarget.createView(),
+                        resource: resolutionDependentStuff.backBufferView,
                     },
                 ],
             });
@@ -210,20 +214,13 @@
 
             cameraController.update(dt);
 
-            const encoder = device.createCommandEncoder();
-
             const cameraView = cameraController.view;
+            clusterRenderer.update({
+                view: cameraView,
+                projection: resolutionDependentStuff.projection
+            }, {instances: [mat4n.identity()]});//[mat4n.scaling(clusterScale)]});
 
-            const config = {
-                camera: {
-                    position: cameraController.position,
-                    inverseView: mat4n.inverse(cameraView),
-                    inverseProjection: mat4n.inverse(resolutionDependentStuff.projection),
-                },
-                frameId,
-            };
-
-            clusterRenderer.update({view: cameraView, projection}, {instances: [mat4n.identity()]});
+            const encoder = device.createCommandEncoder();
 
             const geometryPass = encoder.beginRenderPass({
                 colorAttachments: [{
@@ -251,7 +248,7 @@
                 }],
             });
             pass.setPipeline(presentPipeline);
-            pass.setBindGroup(0, resolutionDependentStuff.bindGroup);
+            pass.setBindGroup(0, resolutionDependentStuff.presentBindGroup);
             pass.draw(3);
             pass.end();
 

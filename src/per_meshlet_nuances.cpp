@@ -74,7 +74,7 @@ namespace pmn {
       std::chrono::duration_cast<std::chrono::milliseconds>(end_build_meshlets - start_build_meshlets).count());
     */
 
-  const meshopt_Meshlet& last = meshlets.meshlets.back();
+  const auto& last = meshlets.meshlets.back();
   meshlets.vertices.resize(last.vertex_offset + last.vertex_count);
   meshlets.triangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
 
@@ -225,7 +225,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   const float cone_weight = 0.5;
   const size_t max_num_clusters_per_group = 4;
   const float simplify_target_index_count_threshold = 0.5f;
-  const size_t max_lod_count = 25;
+  const size_t max_lod_count = 1;  //25;
   const float min_target_error = 1e-2f;
   const float max_target_error = 1.0f;
 
@@ -369,29 +369,29 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
             lod_meshlets[i].meshlets[cluster_index].triangle_offset += next_meshlets.triangles.size();
           }
           next_meshlets.meshlets.insert(
-              next_meshlets.meshlets.end(),
-              std::make_move_iterator(lod_meshlets[i].meshlets.begin()),
-              std::make_move_iterator(lod_meshlets[i].meshlets.end()));
+              next_meshlets.meshlets.cend(),
+              std::make_move_iterator(lod_meshlets[i].meshlets.cbegin()),
+              std::make_move_iterator(lod_meshlets[i].meshlets.cend()));
           next_meshlets.vertices.insert(
-              next_meshlets.vertices.end(),
-              std::make_move_iterator(lod_meshlets[i].vertices.begin()),
-              std::make_move_iterator(lod_meshlets[i].vertices.end()));
+              next_meshlets.vertices.cend(),
+              std::make_move_iterator(lod_meshlets[i].vertices.cbegin()),
+              std::make_move_iterator(lod_meshlets[i].vertices.cend()));
           next_meshlets.triangles.insert(
-              next_meshlets.triangles.end(),
-              std::make_move_iterator(lod_meshlets[i].triangles.begin()),
-              std::make_move_iterator(lod_meshlets[i].triangles.end()));
+              next_meshlets.triangles.cend(),
+              std::make_move_iterator(lod_meshlets[i].triangles.cbegin()),
+              std::make_move_iterator(lod_meshlets[i].triangles.cend()));
         }
         next_clusters.insert(
-            next_clusters.end(),
-            std::make_move_iterator(lod_clusters[i].begin()),
-            std::make_move_iterator(lod_clusters[i].end()));
+            next_clusters.cend(),
+            std::make_move_iterator(lod_clusters[i].cbegin()),
+            std::make_move_iterator(lod_clusters[i].cend()));
       }
 
       dagNodes.reserve(dagNodes.size() + num_new_meshlets);
       dagNodes.insert(
-          dagNodes.end(),
-          std::make_move_iterator(lod_dag_nodes.begin()),
-          std::make_move_iterator(lod_dag_nodes.begin() + static_cast<off_t>(num_new_meshlets)));
+          dagNodes.cend(),
+          std::make_move_iterator(lod_dag_nodes.cbegin()),
+          std::make_move_iterator(lod_dag_nodes.cbegin() + static_cast<off_t>(num_new_meshlets)));
 
       printf(
           "num meshlets: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
@@ -440,29 +440,37 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   std::vector<size_t> offsets{};
   lod_offsets.reserve(lods.size());
-  size_t meshlets_offset = 0;
-  size_t vertices_offset = 0;
-  size_t triangles_offset = 0;
   MeshletsBuffers concatenated{};
   for (size_t i = 0; i < lods.size(); ++i) {
-    offsets.push_back(meshlets_offset);
+    printf(
+        "%i meshlets %i vertices %i triangles\n",
+        int(lods[i].meshlets.size()),
+        int(lods[i].vertices.size()),
+        int(lods[i].triangles.size()));
+    offsets.push_back(concatenated.meshlets.size());
     if (i == 0) {
-      concatenated.meshlets.insert(concatenated.meshlets.cend(), lods[i].meshlets.cbegin(), lods[i].meshlets.cbegin());
+      concatenated.meshlets.insert(concatenated.meshlets.cend(), lods[i].meshlets.cbegin(), lods[i].meshlets.cend());
     } else {
       std::transform(
           lods[i].meshlets.cbegin(), lods[i].meshlets.cend(), std::back_inserter(concatenated.meshlets), [&](auto m) {
-            m.vertex_offset += vertices_offset;
-            m.triangle_offset += triangles_offset;
+            m.vertex_offset += concatenated.vertices.size();
+            m.triangle_offset += concatenated.triangles.size();
             return m;
           });
     }
-    concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cbegin());
-    concatenated.triangles.insert(
-        concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cbegin());
-    meshlets_offset += concatenated.meshlets.size();
-    vertices_offset += concatenated.vertices.size();
-    triangles_offset += concatenated.triangles.size();
+    concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cend());
+    concatenated.triangles.insert(concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cend());
+    printf(
+        "concatenated: %i meshlets %i vertices %i triangles\n",
+        int(concatenated.meshlets.size()),
+        int(concatenated.vertices.size()),
+        int(concatenated.triangles.size()));
   }
+
+  float aabb_min[3] = {
+      std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+  float aabb_max[3] = {
+      std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min()};
 
   std::ofstream js_stream("/home/lukas/Projects/per-meshlet-nuances/demo/demo-mesh.js");
   js_stream << "export const mesh = {\n";
@@ -472,6 +480,12 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     if (i != vertices.size() - 1) {
       js_stream << ",";
     }
+    if (i % 3 == 0) {
+      for (size_t c = 0; c < 3; ++c) {
+        aabb_min[c] = std::min(aabb_min[c], vertices[i + c]);
+        aabb_max[c] = std::max(aabb_max[c], vertices[i + c]);
+      }
+    }
   }
   js_stream << "]),\n";
 
@@ -479,10 +493,16 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   js_stream << "  meshlets: new Uint32Array([";
   for (size_t i = 0; i < concatenated.meshlets.size(); ++i) {
+    if (i < lods[0].meshlets.size()) {
+      assert(concatenated.meshlets[i].vertex_offset == lods[0].meshlets[i].vertex_offset);
+      assert(concatenated.meshlets[i].triangle_offset == lods[0].meshlets[i].triangle_offset);
+      assert(concatenated.meshlets[i].vertex_count == lods[0].meshlets[i].vertex_count);
+      assert(concatenated.meshlets[i].triangle_count == lods[0].meshlets[i].triangle_count);
+    }
     js_stream << concatenated.meshlets[i].vertex_offset << ",";
     js_stream << concatenated.meshlets[i].triangle_offset << ",";
     js_stream << concatenated.meshlets[i].vertex_count << ",";
-    js_stream << concatenated.meshlets[i].triangle_count << ",";
+    js_stream << concatenated.meshlets[i].triangle_count;
     if (i != concatenated.meshlets.size() - 1) {
       js_stream << ",";
     }
@@ -491,6 +511,9 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   js_stream << "  meshletVertices: new Uint32Array([";
   for (size_t i = 0; i < concatenated.vertices.size(); ++i) {
+    if (i < lods[0].vertices.size()) {
+      assert(concatenated.vertices[i] == lods[0].vertices[i]);
+    }
     js_stream << concatenated.vertices[i];
     if (i != concatenated.vertices.size() - 1) {
       js_stream << ",";
@@ -500,7 +523,10 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
   js_stream << "  meshletTriangles: new Uint32Array([";
   for (size_t i = 0; i < concatenated.triangles.size(); ++i) {
-    js_stream << concatenated.triangles[i];
+    if (i < lods[0].triangles.size()) {
+      assert(concatenated.triangles[i] == lods[0].triangles[i]);
+    }
+    js_stream << static_cast<uint32_t>(concatenated.triangles[i]);
     if (i != concatenated.triangles.size() - 1) {
       js_stream << ",";
     }
@@ -516,9 +542,12 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   }
   js_stream << "]),\n";
 
-  js_stream << "  numMeshlets: " << offsets.back() << ",\n";
+  js_stream << "  numMeshlets: " << concatenated.meshlets.size() << ",\n";
 
   js_stream << "  maxClusterTriangles: " << max_triangles << ",\n";
+
+  js_stream << "  aabb: {min: new Float32Array([" << aabb_min[0] << "," << aabb_min[1] << "," << aabb_min[2]
+            << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
 
   // todo: dag data
 
