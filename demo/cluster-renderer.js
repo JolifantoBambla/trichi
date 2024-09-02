@@ -1,4 +1,4 @@
-import {mesh} from './test-mesh.js'; //'./demo-mesh.js';
+import {mesh} from './demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
 
 function makeVertexBuffer(device) {

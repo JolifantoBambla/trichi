@@ -216,7 +216,7 @@
             clusterRenderer.update({
                 view: cameraView,
                 projection: resolutionDependentStuff.projection
-            }, {instances: [mat4n.scaling(clusterScale)]});
+            }, {instances: [mat4n.identity()]});//[mat4n.scaling(clusterScale)]});
 
             const encoder = device.createCommandEncoder();
 
