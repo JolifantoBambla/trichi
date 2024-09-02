@@ -85,5 +85,4 @@ fn fragment(frag_in: VertexOut) -> @location(0) vec4<f32> {
     let albedo = frag_in.color;
     return vec4(saturate(albedo), 1.0);
 }
-
 `;

@@ -59,8 +59,8 @@ struct VertexOut {
 }
 
 @vertex
-fn vertex(@builtin(instance_index) cluster_index: u32, @builtin(vertex_index) vertex_index: u32) -> VertexOut {
-    let cluster_instance = cluster_instances[cluster_index];
+fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_index) vertex_index: u32) -> VertexOut {
+    let cluster_instance = cluster_instances[cluster_instance_index];
 
     let meshlet = meshlets[cluster_instance.cluster_index];
     if vertex_index >= (meshlet.triangle_count * 3) {
@@ -70,9 +70,11 @@ fn vertex(@builtin(instance_index) cluster_index: u32, @builtin(vertex_index) ve
         );
     }
 
+    let model = instances[cluster_instance.instance_index].model;
+
     let vertex = get_vertex(meshlet, vertex_index);
     return VertexOut(
-        camera.projection * camera.view * instances[cluster_instance.instance_index].model * vec4(vertex.position, 1.0),
+        camera.projection * camera.view * model * vec4(vertex.position, 1.0),
         get_meshlet_color(cluster_instance.cluster_index),
     );
 }
