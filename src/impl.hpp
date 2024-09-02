@@ -21,10 +21,8 @@ struct MeshletsBuffers {
 
 struct Cluster {
   size_t index{};
-  MeshletsBuffers* buffers = nullptr;
+  size_t lod{};
   size_t dag_index = 0;
-
-  [[nodiscard]] const meshopt_Meshlet& getMeshlet() const { return buffers->meshlets[index]; }
 };
 
 struct ClusterBounds {
@@ -43,12 +41,15 @@ struct DagNode {
   ClusterBounds bounds{};
 };
 
-[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster);
+[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster,
+                                                                      const std::vector<MeshletsBuffers>& lods);
 
-void extract_boundary(const Cluster& cluster, std::vector<uint64_t>& boundary);
+void extract_boundary(const Cluster& cluster,
+                      const std::vector<MeshletsBuffers>& lods, std::vector<uint64_t>& boundary);
 
 void init_dag_node(
     const Cluster& cluster,
+    const MeshletsBuffers& buffers,
     DagNode& dagNode,
     const std::vector<float>& vertices,
     size_t vertex_count,
@@ -57,10 +58,11 @@ void init_dag_node(
     size_t level,
     float error);
 
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters, LoopRunner& loop_runner);
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner);
 
 [[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
     const std::vector<Cluster>& clusters,
+    const std::vector<MeshletsBuffers>& lods,
     size_t max_clusters_per_group,
     LoopRunner& loop_runner);
 }  // namespace pmn

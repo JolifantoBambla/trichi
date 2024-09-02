@@ -106,18 +106,21 @@ namespace pmn {
 }
 
 [[nodiscard]] std::vector<unsigned int>
-merge_group(const std::vector<Cluster>& clusters, const std::vector<size_t>& group, size_t max_triangles) {
+merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, const std::vector<size_t>& group, size_t max_triangles) {
   std::vector<uint32_t> group_indices{};
   group_indices.reserve(3 * max_triangles * group.size());
   for (const auto& meshlet_index : group) {
     const auto& cluster = clusters[meshlet_index];
-    const auto& meshlet = cluster.getMeshlet();
+    const auto& meshlet = lods[cluster.lod].meshlets[cluster.index];
+    if (meshlet.triangle_offset + (meshlet.triangle_count * 3) > lods[cluster.lod].triangles.size()) {
+      throw std::runtime_error("fuck");
+    }
     std::transform(
-        cluster.buffers->triangles.cbegin() + meshlet.triangle_offset,
-        cluster.buffers->triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
+        lods[cluster.lod].triangles.cbegin() + meshlet.triangle_offset,
+        lods[cluster.lod].triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
         std::back_inserter(group_indices),
-        [&cluster, &meshlet](const auto& vertex_index) {
-          return cluster.buffers->vertices[meshlet.vertex_offset + vertex_index];
+        [&cluster, &lods, &meshlet](const auto& vertex_index) {
+          return lods[cluster.lod].vertices[meshlet.vertex_offset + vertex_index];
         });
   }
   return std::move(group_indices);
@@ -220,12 +223,12 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
 
   // todo: should be params
-  const size_t max_vertices = 255;
+  const size_t max_vertices = 64;
   const size_t max_triangles = 128;
   const float cone_weight = 0.5;
   const size_t max_num_clusters_per_group = 4;
   const float simplify_target_index_count_threshold = 0.5f;
-  const size_t max_lod_count = 1;  //25;
+  const size_t max_lod_count = 25;
   const float min_target_error = 1e-2f;
   const float max_target_error = 1.0f;
 
@@ -242,10 +245,10 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   for (size_t i = 0; i < clusters.size(); ++i) {
     clusters[i] = Cluster{
         .index = i,
-        .buffers = &lods[0],
+        .lod = 0,
         .dag_index = i,
     };
-    init_dag_node(clusters[i], dagNodes[i], vertices, vertex_count, vertex_stride, i, 0, 0.0);
+    init_dag_node(clusters[i], lods[0], dagNodes[i], vertices, vertex_count, vertex_stride, i, 0, 0.0);
   }
 
   for (size_t level = 1; level < max_lod_count; ++level) {
@@ -259,7 +262,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
 
     const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
     const auto groups = is_last ? build_final_cluster_group(clusters.size())
-                                : group_clusters(clusters, max_num_clusters_per_group, loop_runner);
+                                : group_clusters(clusters, lods, max_num_clusters_per_group, loop_runner);
 
     std::atomic_size_t num_new_meshlets = 0;
     std::atomic_size_t num_new_vertices = 0;
@@ -272,7 +275,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     std::vector<DagNode> lod_dag_nodes(groups.size() * 4);
     loop_runner.loop(0, groups.size(), [&](const size_t i) {
       const auto& group = groups[i];
-      const auto group_indices = merge_group(clusters, groups[i], max_triangles);
+      const auto group_indices = merge_group(clusters, lods, group, max_triangles);
 
       const auto [simplified_indices, error] = simplify_group(
           group_indices,
@@ -324,11 +327,11 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
             const size_t dag_node_index = node_offset + cluster_index;
             const auto& cluster = lod_clusters[i].emplace_back(Cluster{
                 .index = cluster_index,
-                .buffers = &group_meshlets,
+                .lod = level,
                 .dag_index = dag_node_index,
             });
             auto& node = lod_dag_nodes[dag_node_index];
-            init_dag_node(cluster, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
+            init_dag_node(cluster, group_meshlets, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
             node.children.insert(node.children.end(), child_dag_indices.cbegin(), child_dag_indices.cend());
           }
 
@@ -360,8 +363,10 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
         if (!lod_meshlets[i].meshlets.empty()) {
           for (size_t cluster_index = 0; cluster_index < lod_clusters[i].size(); ++cluster_index) {
             auto& cluster = lod_clusters[i][cluster_index];
+            if (cluster.lod != level) {
+              continue;
+            }
             cluster.index += next_meshlets.meshlets.size();
-            cluster.buffers = &next_meshlets;
             lod_dag_nodes[cluster.dag_index].clusterIndex = cluster.index;
             cluster.dag_index += dagNodes.size();
 
@@ -419,6 +424,11 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
     clusters = std::move(next_clusters);
   }
 
+  if (!lods.empty() && lods.back().meshlets.empty()) {
+    lods.resize(lods.size() - 1);
+  }
+  size_t num_root_nodes = lods.back().meshlets.size();
+
   const auto root = dagNodes.back();
 
   // parallelize, optimize runtime + memory usage, tune
@@ -472,7 +482,7 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   float aabb_max[3] = {
       std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min()};
 
-  std::ofstream js_stream("/home/lukas/Projects/per-meshlet-nuances/demo/demo-mesh.js");
+  std::ofstream js_stream("/home/lherzberger/Projects/per-meshlet-nuances/demo/demo-mesh.js");
   js_stream << "export const mesh = {\n";
   js_stream << "  vertices: new Float32Array([";
   for (size_t i = 0; i < vertices.size(); ++i) {
