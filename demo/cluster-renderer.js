@@ -1,3 +1,5 @@
+import {vec4n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
+
 import {mesh} from './demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
 
@@ -99,6 +101,19 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         ],
     });
 
+    const cullingCameraBuffer = device.createBuffer({
+        label: 'culling camera',
+        size: Float32Array.BYTES_PER_ELEMENT * ((16 * 2) + 4 + (4 * 5)),
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const cullingUniformsBindGroup = device.createBindGroup({
+        label: 'culling uniforms',
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            {binding: 0, resource: {buffer: cullingCameraBuffer}},
+        ],
+    });
+
     const numInstances = 1;
     const instancesBuffer = device.createBuffer({
         label: 'instances',
@@ -150,9 +165,24 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     console.log(numLodClusters(0), numInstances, mesh.meshlets.length / 4, mesh.numMeshlets, mesh.strideFloats, mesh.vertices.length / mesh.strideFloats);
 
     return {
-        update({view, projection}, {instances}) {
+        update({view, projection, position}, {instances}, updateCullingCamera = true) {
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
             device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances.flat()]));
+            if (updateCullingCamera) {
+                const viewProjectionTranspose = mat4n.transpose(mat4n.mul(projection, view));
+                const x = vec4n.create(...mat4n.getAxis(viewProjectionTranspose, 0), viewProjectionTranspose[3]);
+                const y = vec4n.create(...mat4n.getAxis(viewProjectionTranspose, 1), viewProjectionTranspose[7]);
+                const z = vec4n.create(...mat4n.getAxis(viewProjectionTranspose, 2), viewProjectionTranspose[11]);
+                const w = vec4n.create(viewProjectionTranspose[12], viewProjectionTranspose[13], viewProjectionTranspose[14], viewProjectionTranspose[15]);
+                const frustumPlanes = [
+                    vec4n.add(w, x),
+                    vec4n.subtract(w, x),
+                    vec4n.add(w, y),
+                    vec4n.subtract(w, y),
+                    vec4n.subtract(w, z),
+                ];
+                device.queue.writeBuffer(cullingCameraBuffer, 0, new Float32Array([...view, ...projection, ...position, 0, ...frustumPlanes.flat()]));
+            }
         },
         encode(passEncoder, lod = 0) {
             lod = Math.min(Math.max(lod, 0), mesh.lods.length - 1);

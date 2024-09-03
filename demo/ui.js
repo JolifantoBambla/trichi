@@ -1,12 +1,10 @@
-import {
-    makeEarthAtmosphere
-} from 'https://jolifantobambla.github.io/webgpu-sky-atmosphere/dist/1.x/webgpu-sky-atmosphere.module.min.js';
 import {Pane} from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.3/dist/tweakpane.min.js';
 
 export function makeUi(numLods) {
     const params = {
         renderSettings: {
             lod: 0,
+            updateCullingCamera: true,
         },
     };
 
@@ -33,6 +31,7 @@ Escape: exit pointer lock on canvas`,
         expanded: true,
     });
     renderSettingsFolder.addBinding(params.renderSettings, 'lod', {label: 'LOD', min: 0, max: numLods - 1, step: 1});
+    renderSettingsFolder.addBinding(params.renderSettings, 'updateCullingCamera', {label: 'Update culling camera'});
 
     return params;
 }

@@ -66,16 +66,17 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
 
     // frustum culling
     let center = (transform * vec4(bounds.center, 1.0)).xyz;
-    var visible = dot(vec4(center, 1.0), camera.frustum[0]) + bounds.radius >= 0.0;
-    var visible = dot(vec4(center, 1.0), camera.frustum[1]) + bounds.radius >= 0.0;
-    var visible = dot(vec4(center, 1.0), camera.frustum[2]) + bounds.radius >= 0.0;
-    var visible = dot(vec4(center, 1.0), camera.frustum[3]) + bounds.radius >= 0.0;
-    var visible = dot(vec4(center, 1.0), camera.frustum[4]) + bounds.radius >= 0.0;
+    var visible =
+        (dot(vec4(center, 1.0), camera.frustum[0]) + bounds.radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[1]) + bounds.radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[2]) + bounds.radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[3]) + bounds.radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[4]) + bounds.radius >= 0.0);
     if !visible {
         return;
     }
 
-    // backface culling
+    // backface culling (if cutoff is >= 1 then the normal cone is too wide for backface culling)
     if bounds.cone_cutoff < 1.0 && dot(normalize(bounds.cone_apex - camera.position), bounds.cone_axis) >= bounds.cone_cutoff {
         return;
     }

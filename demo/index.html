@@ -213,10 +213,15 @@
             cameraController.update(dt);
 
             const cameraView = cameraController.view;
-            clusterRenderer.update({
-                view: cameraView,
-                projection: resolutionDependentStuff.projection
-            }, {instances: [mat4n.identity()]});//[mat4n.scaling(clusterScale)]});
+            clusterRenderer.update(
+                {
+                    view: cameraView,
+                    projection: resolutionDependentStuff.projection,
+                    position: cameraController.position,
+                },
+                {instances: [mat4n.identity()]}, //[mat4n.scaling(clusterScale)]});
+                params.renderSettings.updateCullingCamera
+            );
 
             const encoder = device.createCommandEncoder();
 
