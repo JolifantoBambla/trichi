@@ -1,4 +1,4 @@
-import {vec4n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
+import {vec3n, vec4n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
 
 import {mesh} from './demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
@@ -181,6 +181,9 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                     vec4n.subtract(w, y),
                     vec4n.subtract(w, z),
                 ];
+                for (let i = 0; i < frustumPlanes.length; ++i) {
+                    vec4n.divScalar(frustumPlanes[i], vec3n.length(vec3n.create(frustumPlanes[i][0], frustumPlanes[i][1], frustumPlanes[i][2])), frustumPlanes[i]);
+                }
                 device.queue.writeBuffer(cullingCameraBuffer, 0, new Float32Array([...view, ...projection, ...position, 0, ...frustumPlanes.flat()]));
             }
         },
