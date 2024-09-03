@@ -560,6 +560,20 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
             << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
 
   // todo: dag data
+  js_stream << "  bounds: new Float32Array([";
+  for (size_t i = 0; i < dagNodes.size(); ++i) {
+    const auto& node = dagNodes[i];
+    js_stream << node.bounds.center[0] << "," << node.bounds.center[1] << "," << node.bounds.center[2] << ",";
+    js_stream << node.bounds.radius << ",";
+    js_stream << node.bounds.cone_axis[0] << "," << node.bounds.cone_axis[1] << "," << node.bounds.cone_axis[2] << ",";
+    js_stream << node.bounds.error << ",";
+    js_stream << node.bounds.cone_apex[0] << "," << node.bounds.cone_apex[1] << "," << node.bounds.cone_apex[2] << ",";
+    js_stream << node.bounds.cone_cutoff;
+    if (i < dagNodes.size() - 1) {
+      js_stream << ",";
+    }
+  }
+  js_stream << "]),\n";
 
   js_stream << "}" << std::endl;
 }

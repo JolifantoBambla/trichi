@@ -3,6 +3,8 @@ import {vec3n, vec4n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.
 import {mesh} from './demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
 
+const numInstances = 1;
+
 function makeVertexBuffer(device) {
     const vertexBuffer = device.createBuffer({
         label: 'vertices',
@@ -46,6 +48,118 @@ function makeMeshletBuffers(device) {
         meshletTrianglesBuffer,
     };
 }
+
+const perFrameUniformsLayout = {
+    label: 'per frame uniforms',
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'uniform',
+                minBindingSize: Float32Array.BYTES_PER_ELEMENT * ((16 * 2) + (4 * 6)),
+            }
+        },
+    ],
+}
+
+const meshPoolLayout = {
+    label: 'mesh & instance pool',
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: Float32Array.BYTES_PER_ELEMENT * 16 * numInstances,
+            },
+        },
+        {
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: mesh.meshlets.byteLength,
+            },
+        },
+        {
+            binding: 2,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: mesh.meshletVertices.byteLength,
+            },
+        },
+        {
+            binding: 3,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: mesh.meshletTriangles.byteLength,
+            },
+        },
+        {
+            binding: 4,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: mesh.vertices.byteLength,
+            },
+        },
+        {
+            binding: 5,
+            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+            buffer: {
+                type: 'storage',
+                minBindingSize: mesh.bounds.byteLength,
+            },
+        },
+    ],
+}
+
+const selectedClustersLayout = {
+    label: 'selected clusters',
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: {
+                type: 'storage',
+                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
+            },
+        },
+        {
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: {
+                type: 'storage',
+                minBindingSize: Uint32Array.BYTES_PER_ELEMENT,
+            },
+        },
+    ],
+};
+
+const visibleClustersLayout = {
+    label: 'selected clusters',
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: {
+                type: 'storage',
+                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
+            },
+        },
+        {
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: {
+                type: 'storage',
+                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 4,
+            },
+        },
+    ],
+};
 
 
 function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
@@ -114,7 +228,6 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         ],
     });
 
-    const numInstances = 1;
     const instancesBuffer = device.createBuffer({
         label: 'instances',
         size: Float32Array.BYTES_PER_ELEMENT * 16 * numInstances,
