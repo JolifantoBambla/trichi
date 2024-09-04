@@ -1,20 +1,55 @@
 # per-meshlet-nuances
-Poor man's nanite
+
+Poor man's nanite. Creates a triangle cluster hierarchy that can be used to select the appropriate levels of detail for different regions of a mesh on a per-cluster basis during rendering.
+
+Note that this library only preprocesses triangle meshes but does not provide any rendering solution. There is, however, a WebGPU demo that demonstrates what a renderer for such cluster hierarchies could look like.
+
+## Disclaimer
+
+The API is not yet stable and the implementation is neither optimized for runtime performance nor quality.
+If you want to help change that, any help is more than welcome :)
+
+Preprocessing a 4.3 million triangle mesh takes about 2 minutes.
+
+## Getting Started
+
+### CPM
+
+```cmake
+CPMAddPackage("gh:JolifantoBambla/per-meshlet-nuances#v0.1.0")
+
+target_link_libraries(${YOUR_TARGET} pmn)
+```
+
+## Usage
+
+```cpp
+#include "per_meshlet_nuances.hpp"
+
+// todo: docs & api
+pmn::create_dag(/* ... */);
+```
 
 
 ## Dependencies
 
- - [meshoptimizer](https://github.com/zeux/meshoptimizer): for triangle clustering and mesh simplification
- - [METIS](https://github.com/KarypisLab/METIS): for grouping neighboring triangle clusters
- - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with multithreading option): for parallelizing some dag construction steps
+ - [meshoptimizer](https://github.com/zeux/meshoptimizer): used for triangle clustering and mesh simplification, MIT licensed
+ - [METIS](https://github.com/KarypisLab/METIS): used for grouping neighboring triangle clusters, Apache 2.0 licensed
+ - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with multithreading option): used for parallelizing some dag construction steps, MIT licensed
+
+## Caveats
+
+### No faceted meshes supported
+
+All steps of the algorithm build on the assumption that the input mesh is contiguous. It is the user's responsibility to ensure that this condition is satisfied, e.g., by welding similar vertices beforehand.
 
 ## Related Projects
 
  - [Nanite (Unreal Engine 5)](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-virtualized-geometry-in-unreal-engine)
- - [Nexus](https://github.com/cnr-isti-vclab/nexus): The OG triangle cluster DAG. Try it in Three.js!
- - [Carrot Engine](https://github.com/jglrxavpok/Carrot)
- - [THREE Nanite](https://github.com/AIFanatic/three-nanite)
- - [Nanite WebGPU](https://github.com/Scthe/nanite-webgpu)
+ - [Nexus](https://github.com/cnr-isti-vclab/nexus): The OG triangle cluster DAG. This data format is open source and supported by Three.js.
+ - [Carrot Engine](https://github.com/jglrxavpok/Carrot): A WIP game engine supporting virtualized geometry including hardware-accelerated ray tracing of Nanite-like cluster hierarchies.
+ - [THREE Nanite](https://github.com/AIFanatic/three-nanite): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in Three.js.
+ - [Nanite WebGPU](https://github.com/Scthe/nanite-webgpu): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in WebGPU. Includes software rasterization for very small triangles.
 
 ## Further Reading
 
