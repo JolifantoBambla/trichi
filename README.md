@@ -1,4 +1,4 @@
-# Hierarchal Triangle Clusters
+# Tri Chi: Triangle Cluster Hierarchy
 
 A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
