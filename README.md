@@ -18,9 +18,9 @@ Preprocessing a 4.3 million triangle mesh takes about 2 minutes.
 ### CPM
 
 ```cmake
-CPMAddPackage("gh:JolifantoBambla/hitric#v0.1.0")
+CPMAddPackage("gh:JolifantoBambla/trichi#v0.1.0")
 
-target_link_libraries(${YOUR_TARGET} hitric)
+target_link_libraries(${YOUR_TARGET} trichi)
 ```
 
 ### CMake options
@@ -32,10 +32,10 @@ Build Multithreaded
 ## Usage
 
 ```cpp
-#include "hitric.hpp"
+#include "trichi.hpp"
 
 // todo: docs & api
-hitric::build_cluster_dag(/* ... */);
+trichi::build_cluster_hierarchy(/* ... */);
 ```
 
 
