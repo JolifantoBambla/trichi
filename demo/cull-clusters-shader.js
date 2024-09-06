@@ -1,3 +1,4 @@
+export const cullClustersShader = `
 override WORKGROUP_SIZE: u32 = 256u;
 
 struct Camera {
@@ -83,3 +84,5 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
     render_clusters_args.first_vertex = 0;
     render_clusters_args.first_instance = 0;
 }
+
+`;

@@ -225,6 +225,14 @@
 
             const encoder = device.createCommandEncoder();
 
+            clusterRenderer.encodeIndirect(
+                encoder,
+                params.renderSettings.lod,
+                resolutionDependentStuff.backBufferView,
+                resolutionDependentStuff.depthBufferView,
+            );
+
+            /*
             const geometryPass = encoder.beginRenderPass({
                 colorAttachments: [{
                     view: resolutionDependentStuff.backBufferView,
@@ -241,6 +249,7 @@
             });
             clusterRenderer.encode(geometryPass, params.renderSettings.lod);
             geometryPass.end();
+             */
 
             const pass = encoder.beginRenderPass({
                 colorAttachments: [{

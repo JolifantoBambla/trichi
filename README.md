@@ -50,6 +50,7 @@ All steps of the algorithm build on the assumption that the input mesh is contig
  - [Carrot Engine](https://github.com/jglrxavpok/Carrot): A WIP game engine supporting virtualized geometry including hardware-accelerated ray tracing of Nanite-like cluster hierarchies.
  - [THREE Nanite](https://github.com/AIFanatic/three-nanite): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in Three.js.
  - [Nanite WebGPU](https://github.com/Scthe/nanite-webgpu): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in WebGPU. Includes software rasterization for very small triangles.
+ - [meshoptimizer](https://github.com/zeux/meshoptimizer): A wild nanite demo appeared! Looks like Zeux is working on a new addition to the meshoptimizer library <3
 
 ## Further Reading
 

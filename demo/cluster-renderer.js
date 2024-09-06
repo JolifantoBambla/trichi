@@ -2,6 +2,7 @@ import {vec3n, vec4n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.
 
 import {mesh} from './demo-mesh.js';
 import {renderClusterWgsl} from './render-clusters-shader.js';
+import {cullClustersShader} from './cull-clusters-shader.js';
 
 const numInstances = 1;
 
@@ -36,131 +37,48 @@ function makeMeshletBuffers(device) {
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
+    const boundsBuffer = device.createBuffer({
+        label: 'meshlet bounds',
+        size: mesh.bounds.byteLength,
+        usage: GPUBufferUsage.STORAGE,
+        mappedAtCreation: true,
+    });
     (new Uint32Array(meshletsBuffer.getMappedRange())).set(mesh.meshlets);
     (new Uint32Array(meshletVerticesBuffer.getMappedRange())).set(mesh.meshletVertices);
     (new Uint32Array(meshletTrianglesBuffer.getMappedRange())).set(mesh.meshletTriangles);
+    (new Float32Array(boundsBuffer.getMappedRange())).set(mesh.bounds);
     meshletsBuffer.unmap();
     meshletVerticesBuffer.unmap();
     meshletTrianglesBuffer.unmap();
+    boundsBuffer.unmap();
     return {
         meshletsBuffer,
         meshletVerticesBuffer,
         meshletTrianglesBuffer,
+        boundsBuffer,
     };
 }
 
-const perFrameUniformsLayout = {
-    label: 'per frame uniforms',
-    entries: [
-        {
-            binding: 0,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'uniform',
-                minBindingSize: Float32Array.BYTES_PER_ELEMENT * ((16 * 2) + (4 * 6)),
-            }
+function makeCullClustersPipeline(device, {perFrameUniformsLayout, meshPoolLayout, selectedClustersLayout, visibleClustersLayout}) {
+    return device.createComputePipeline({
+        label: 'cull clusters',
+        layout: device.createPipelineLayout({
+            label: 'cull clusters',
+            bindGroupLayouts: [
+                perFrameUniformsLayout,
+                meshPoolLayout,
+                selectedClustersLayout,
+                visibleClustersLayout,
+            ],
+        }),
+        compute: {
+            module: device.createShaderModule({
+                label: 'cull clusters',
+                code: cullClustersShader,
+            }),
         },
-    ],
+    });
 }
-
-const meshPoolLayout = {
-    label: 'mesh & instance pool',
-    entries: [
-        {
-            binding: 0,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: Float32Array.BYTES_PER_ELEMENT * 16 * numInstances,
-            },
-        },
-        {
-            binding: 1,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: mesh.meshlets.byteLength,
-            },
-        },
-        {
-            binding: 2,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: mesh.meshletVertices.byteLength,
-            },
-        },
-        {
-            binding: 3,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: mesh.meshletTriangles.byteLength,
-            },
-        },
-        {
-            binding: 4,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: mesh.vertices.byteLength,
-            },
-        },
-        {
-            binding: 5,
-            visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-            buffer: {
-                type: 'storage',
-                minBindingSize: mesh.bounds.byteLength,
-            },
-        },
-    ],
-}
-
-const selectedClustersLayout = {
-    label: 'selected clusters',
-    entries: [
-        {
-            binding: 0,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: {
-                type: 'storage',
-                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
-            },
-        },
-        {
-            binding: 1,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: {
-                type: 'storage',
-                minBindingSize: Uint32Array.BYTES_PER_ELEMENT,
-            },
-        },
-    ],
-};
-
-const visibleClustersLayout = {
-    label: 'selected clusters',
-    entries: [
-        {
-            binding: 0,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: {
-                type: 'storage',
-                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
-            },
-        },
-        {
-            binding: 1,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: {
-                type: 'storage',
-                minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 4,
-            },
-        },
-    ],
-};
-
 
 function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
     const meshletModule = device.createShaderModule({
@@ -200,6 +118,87 @@ function numLodClusters(lod) {
 }
 
 export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFormat = 'depth24plus', reverseZ = true) {
+    const bindGroupLayouts = {
+        perFrameUniformsLayout: device.createBindGroupLayout({
+            label: 'per frame uniforms',
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+                    buffer: {
+                        type: 'uniform',
+                        minBindingSize: Float32Array.BYTES_PER_ELEMENT * ((16 * 2) + (4 * 6)),
+                    }
+                },
+            ],
+        }),
+        meshPoolLayout: device.createBindGroupLayout({
+            label: 'mesh & instance pool',
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+                    buffer: {
+                        type: 'read-only-storage',
+                        minBindingSize: Float32Array.BYTES_PER_ELEMENT * 16 * numInstances,
+                    },
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+                    buffer: {
+                        type: 'read-only-storage',
+                        minBindingSize: mesh.bounds.byteLength,
+                    },
+                },
+            ],
+        }),
+        selectedClustersLayout: device.createBindGroupLayout({
+            label: 'selected clusters',
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: 'read-only-storage',
+                        minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
+                    },
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: 'read-only-storage',
+                        minBindingSize: Uint32Array.BYTES_PER_ELEMENT,
+                    },
+                },
+            ],
+        }),
+        visibleClustersLayout: device.createBindGroupLayout({
+            label: 'selected clusters',
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: 'storage',
+                        minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 2 * numInstances,
+                    },
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: 'storage',
+                        minBindingSize: Uint32Array.BYTES_PER_ELEMENT * 4,
+                    },
+                },
+            ],
+        }),
+    };
+
+    const cullClustersPipeline = makeCullClustersPipeline(device, bindGroupLayouts);
+
     const pipeline = makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ);
 
     const cameraBuffer = device.createBuffer({
@@ -222,7 +221,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     });
     const cullingUniformsBindGroup = device.createBindGroup({
         label: 'culling uniforms',
-        layout: pipeline.getBindGroupLayout(0),
+        layout: bindGroupLayouts.perFrameUniformsLayout,
         entries: [
             {binding: 0, resource: {buffer: cullingCameraBuffer}},
         ],
@@ -249,11 +248,28 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         ],
     });
 
+    const cullClustersMeshletBindGroup = device.createBindGroup({
+        label: 'cull clusters: mesh & instance data',
+        layout: bindGroupLayouts.meshPoolLayout,
+        entries: [
+            {binding: 0, resource: {buffer: instancesBuffer}},
+            {binding: 1, resource: {buffer: meshletBuffers.boundsBuffer}},
+        ],
+    });
+
     const lodBuffers = [];
+    const lodCountBuffers = [];
+    const cullClustersLodBindGroups = [];
     for (let i = 0; i < mesh.lods.length; ++i) {
         const lodBuffer = device.createBuffer({
             label: `lod ${i} instances`,
             size: Uint32Array.BYTES_PER_ELEMENT * 2 * numLodClusters(i) * numInstances,
+            usage: GPUBufferUsage.STORAGE,
+            mappedAtCreation: true,
+        });
+        const lodCountBuffer = device.createBuffer({
+            label: `lod ${i} instance count`,
+            size: Uint32Array.BYTES_PER_ELEMENT,
             usage: GPUBufferUsage.STORAGE,
             mappedAtCreation: true,
         });
@@ -263,8 +279,20 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                 mesh.lods[i] + Math.floor(c % numLodClusters(i)),
             ];
         }).flat()));
+        (new Uint32Array(lodCountBuffer.getMappedRange())).set(new Uint32Array([numLodClusters(i)  * numInstances]));
         lodBuffer.unmap();
+        lodCountBuffer.unmap();
         lodBuffers.push(lodBuffer);
+        lodCountBuffers.push(lodCountBuffer);
+
+        cullClustersLodBindGroups.push(device.createBindGroup({
+            label: `lod ${i} selected clusters bind group`,
+            layout: bindGroupLayouts.selectedClustersLayout,
+            entries: [
+                {binding: 0, resource: {buffer: lodBuffer}},
+                {binding: 1, resource: {buffer: lodCountBuffer}},
+            ],
+        }));
     }
     const lodBindGroups = lodBuffers.map(b => {
         return device.createBindGroup({
@@ -275,7 +303,32 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         });
     });
 
-    console.log(numLodClusters(0), numInstances, mesh.meshlets.length / 4, mesh.numMeshlets, mesh.strideFloats, mesh.vertices.length / mesh.strideFloats);
+    const visibleClustersBuffer = device.createBuffer({
+        label: `visible instances`,
+        size: Uint32Array.BYTES_PER_ELEMENT * 2 * numLodClusters(0) * numInstances,
+        usage: GPUBufferUsage.STORAGE,
+    });
+    const indirectDrawArgsBuffer = device.createBuffer({
+        label: `indirect draw args`,
+        size: Uint32Array.BYTES_PER_ELEMENT * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT,
+    });
+    const cullClustersResultBindGroup = device.createBindGroup({
+        label: 'cull clusters result',
+        layout: bindGroupLayouts.visibleClustersLayout,
+        entries: [
+            {binding: 0, resource: {buffer: visibleClustersBuffer}},
+            {binding: 1, resource: {buffer: indirectDrawArgsBuffer}},
+        ],
+    });
+
+    const clusterInstancesBindGroup = device.createBindGroup({
+        label: 'cluster instances bind group',
+        layout: pipeline.getBindGroupLayout(2),
+        entries: [
+            {binding: 0, resource: {buffer: visibleClustersBuffer}},
+        ],
+    });
 
     return {
         update({view, projection, position}, {instances}, updateCullingCamera = true) {
@@ -299,6 +352,41 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                 }
                 device.queue.writeBuffer(cullingCameraBuffer, 0, new Float32Array([...view, ...projection, ...position, 0, ...frustumPlanes.flat()]));
             }
+        },
+        encodeIndirect(commandEncoder, lod, backBufferView, depthBufferView) {
+            lod = Math.min(Math.max(lod, 0), mesh.lods.length - 1);
+
+            const cullingPass = commandEncoder.beginComputePass({
+                label: 'cull clusters',
+            });
+            cullingPass.setPipeline(cullClustersPipeline);
+            cullingPass.setBindGroup(0, cullingUniformsBindGroup);
+            cullingPass.setBindGroup(1, cullClustersMeshletBindGroup);
+            cullingPass.setBindGroup(2, cullClustersLodBindGroups[lod]);
+            cullingPass.setBindGroup(3, cullClustersResultBindGroup);
+            cullingPass.dispatchWorkgroups(Math.ceil(256 / (numLodClusters(lod) * numInstances)));
+            cullingPass.end();
+
+            const geometryPass = commandEncoder.beginRenderPass({
+                colorAttachments: [{
+                    view: backBufferView,
+                    clearValue: [0, 0, 0, 1],
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+                depthStencilAttachment: {
+                    view: depthBufferView,
+                    depthClearValue: 0.0, // reverse z
+                    depthLoadOp: 'clear',
+                    depthStoreOp: 'store',
+                },
+            });
+            geometryPass.setPipeline(pipeline);
+            geometryPass.setBindGroup(0, uniformsBindGroup);
+            geometryPass.setBindGroup(1, meshletBindGroup);
+            geometryPass.setBindGroup(2, clusterInstancesBindGroup);
+            geometryPass.drawIndirect(indirectDrawArgsBuffer, 0);
+            geometryPass.end();
         },
         encode(passEncoder, lod = 0) {
             lod = Math.min(Math.max(lod, 0), mesh.lods.length - 1);
