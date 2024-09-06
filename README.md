@@ -1,4 +1,6 @@
-# per-meshlet-nuances
+# HiTriC
+
+C++ library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering
 
 Poor man's nanite. Creates a triangle cluster hierarchy that can be used to select the appropriate levels of detail for different regions of a mesh on a per-cluster basis during rendering.
 
