@@ -1,6 +1,6 @@
-# HiTriC
+# Hierarchal Triangle Clusters
 
-C++ library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering
+A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
 Poor man's nanite. Creates a triangle cluster hierarchy that can be used to select the appropriate levels of detail for different regions of a mesh on a per-cluster basis during rendering.
 
@@ -18,18 +18,24 @@ Preprocessing a 4.3 million triangle mesh takes about 2 minutes.
 ### CPM
 
 ```cmake
-CPMAddPackage("gh:JolifantoBambla/per-meshlet-nuances#v0.1.0")
+CPMAddPackage("gh:JolifantoBambla/hitric#v0.1.0")
 
-target_link_libraries(${YOUR_TARGET} pmn)
+target_link_libraries(${YOUR_TARGET} hitric)
 ```
+
+### CMake options
+
+Build with Metis
+
+Build Multithreaded
 
 ## Usage
 
 ```cpp
-#include "per_meshlet_nuances.hpp"
+#include "hitric.hpp"
 
 // todo: docs & api
-pmn::create_dag(/* ... */);
+hitric::build_cluster_dag(/* ... */);
 ```
 
 
