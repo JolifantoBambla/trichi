@@ -75,6 +75,10 @@ function makeCullClustersPipeline(device, {perFrameUniformsLayout, meshPoolLayou
             module: device.createShaderModule({
                 label: 'cull clusters',
                 code: cullClustersShader,
+                constants: {
+                    WORKGROUP_SIZE: 256,
+                    MAX_TRIANGLES_PER_CLUSTER: mesh.maxClusterTriangles,
+                },
             }),
         },
     });
@@ -198,8 +202,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     };
 
     const cullClustersPipeline = makeCullClustersPipeline(device, bindGroupLayouts);
-
-    const pipeline = makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ);
+    const renderClustersPipeline = makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ);
 
     const cameraBuffer = device.createBuffer({
         label: 'camera',
@@ -208,7 +211,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     });
     const uniformsBindGroup = device.createBindGroup({
         label: 'uniforms',
-        layout: pipeline.getBindGroupLayout(0),
+        layout: renderClustersPipeline.getBindGroupLayout(0),
         entries: [
             {binding: 0, resource: {buffer: cameraBuffer}},
         ],
@@ -238,7 +241,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
 
     const meshletBindGroup = device.createBindGroup({
         label: 'mesh & instance data',
-        layout: pipeline.getBindGroupLayout(1),
+        layout: renderClustersPipeline.getBindGroupLayout(1),
         entries: [
             {binding: 0, resource: {buffer: instancesBuffer}},
             {binding: 1, resource: {buffer: meshletBuffers.meshletsBuffer}},
@@ -282,8 +285,8 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         (new Uint32Array(lodCountBuffer.getMappedRange())).set(new Uint32Array([numLodClusters(i)  * numInstances]));
         lodBuffer.unmap();
         lodCountBuffer.unmap();
-        lodBuffers.push(lodBuffer);
-        lodCountBuffers.push(lodCountBuffer);
+
+        console.log(numLodClusters(i)  * numInstances);
 
         cullClustersLodBindGroups.push(device.createBindGroup({
             label: `lod ${i} selected clusters bind group`,
@@ -293,10 +296,13 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                 {binding: 1, resource: {buffer: lodCountBuffer}},
             ],
         }));
+
+        lodBuffers.push(lodBuffer);
+        lodCountBuffers.push(lodCountBuffer);
     }
     const lodBindGroups = lodBuffers.map(b => {
         return device.createBindGroup({
-            layout: pipeline.getBindGroupLayout(2),
+            layout: renderClustersPipeline.getBindGroupLayout(2),
             entries: [
                 {binding: 0, resource: {buffer: b}},
             ],
@@ -311,7 +317,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     const indirectDrawArgsBuffer = device.createBuffer({
         label: `indirect draw args`,
         size: Uint32Array.BYTES_PER_ELEMENT * 4,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST,
     });
     const cullClustersResultBindGroup = device.createBindGroup({
         label: 'cull clusters result',
@@ -324,7 +330,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
 
     const clusterInstancesBindGroup = device.createBindGroup({
         label: 'cluster instances bind group',
-        layout: pipeline.getBindGroupLayout(2),
+        layout: renderClustersPipeline.getBindGroupLayout(2),
         entries: [
             {binding: 0, resource: {buffer: visibleClustersBuffer}},
         ],
@@ -332,6 +338,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
 
     return {
         update({view, projection, position}, {instances}, updateCullingCamera = true) {
+            device.queue.writeBuffer(indirectDrawArgsBuffer, 0, new Uint32Array([0, 0, 0, 0]));
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
             device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances.flat()]));
             if (updateCullingCamera) {
@@ -364,7 +371,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
             cullingPass.setBindGroup(1, cullClustersMeshletBindGroup);
             cullingPass.setBindGroup(2, cullClustersLodBindGroups[lod]);
             cullingPass.setBindGroup(3, cullClustersResultBindGroup);
-            cullingPass.dispatchWorkgroups(Math.ceil(256 / (numLodClusters(lod) * numInstances)));
+            cullingPass.dispatchWorkgroups(Math.ceil((numLodClusters(lod) * numInstances) / 256));
             cullingPass.end();
 
             const geometryPass = commandEncoder.beginRenderPass({
@@ -381,7 +388,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
                     depthStoreOp: 'store',
                 },
             });
-            geometryPass.setPipeline(pipeline);
+            geometryPass.setPipeline(renderClustersPipeline);
             geometryPass.setBindGroup(0, uniformsBindGroup);
             geometryPass.setBindGroup(1, meshletBindGroup);
             geometryPass.setBindGroup(2, clusterInstancesBindGroup);
@@ -390,7 +397,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         },
         encode(passEncoder, lod = 0) {
             lod = Math.min(Math.max(lod, 0), mesh.lods.length - 1);
-            passEncoder.setPipeline(pipeline);
+            passEncoder.setPipeline(renderClustersPipeline);
             passEncoder.setBindGroup(0, uniformsBindGroup);
             passEncoder.setBindGroup(1, meshletBindGroup);
             passEncoder.setBindGroup(2, lodBindGroups[lod]);
