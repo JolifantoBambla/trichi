@@ -10,7 +10,7 @@
 
 #include "impl.hpp"
 
-namespace pmn {
+namespace trichi {
 struct Graph {
   std::vector<idx_t> xadj;
   std::vector<idx_t> adjacency;
@@ -161,4 +161,4 @@ struct Graph {
     LoopRunner& loop_runner) {
   return std::move(partition_graph(std::move(build_cluster_graph(clusters, lods, loop_runner)), max_clusters_per_group));
 }
-}  // namespace pmn
+}  // namespace trichi

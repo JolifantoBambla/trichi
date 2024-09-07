@@ -74,8 +74,10 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
         return;
     }
 
-    // backface culling (if cutoff is >= 1 then the normal cone is too wide for backface culling)
-    if bounds.cone_cutoff < 1.0 && dot(normalize(bounds.cone_apex - camera.position), bounds.cone_axis) >= bounds.cone_cutoff {
+    // backface culling - (if cutoff is >= 1 then the normal cone is too wide for backface culling)
+    let cone_apex = (transform * vec4(bounds.cone_apex, 1.0)).xyz;
+    let cone_axis = normalize((transform * vec4(bounds.cone_axis, 0.0)).xyz);
+    if bounds.cone_cutoff < 1.0 && dot(normalize(cone_apex - camera.position), cone_axis) >= bounds.cone_cutoff {
         return;
     }
 

@@ -2,8 +2,8 @@
 // Created by lukas on 28.08.24.
 //
 
-#ifndef PER_MESHLET_NUANCES_IMPL_HPP
-#define PER_MESHLET_NUANCES_IMPL_HPP
+#ifndef TRICHI_IMPL_HPP
+#define TRICHI_IMPL_HPP
 
 #include <unordered_map>
 #include <vector>
@@ -12,7 +12,7 @@
 
 #include "util.hpp"
 
-namespace pmn {
+namespace trichi {
 struct MeshletsBuffers {
   std::vector<meshopt_Meshlet> meshlets;
   std::vector<unsigned int> vertices;
@@ -65,6 +65,6 @@ void init_dag_node(
     const std::vector<MeshletsBuffers>& lods,
     size_t max_clusters_per_group,
     LoopRunner& loop_runner);
-}  // namespace pmn
+}  // namespace trichi
 
-#endif  //PER_MESHLET_NUANCES_IMPL_HPP
+#endif  //TRICHI_IMPL_HPP

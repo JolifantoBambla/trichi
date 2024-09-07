@@ -6,7 +6,7 @@
 #include "assimp/scene.h"
 #include "argparse/argparse.hpp"
 
-#include "per_meshlet_nuances.hpp"
+#include "trichi.hpp"
 
 int main(int argc, char* argv[]) {
   argparse::ArgumentParser program("per_meshlet_nuances");
@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
           int(scene->mMeshes[0]->mNumVertices * floats_per_vertex));
     }
 
-    pmn::create_dag(indices, vertices, vertex_stride);
+    trichi::build_cluster_hierarchy(indices, vertices, vertex_stride);
   }
 
   return 0;

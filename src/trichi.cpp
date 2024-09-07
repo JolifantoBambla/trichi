@@ -16,27 +16,27 @@
 #include "metis.h"
 
 #include "impl.hpp"
-#include "per_meshlet_nuances.hpp"
+#include "trichi.hpp"
 
 // todo: I have a lot of embarrassingly parallel steps in here - std::async adds a lot of overhead for creating and destroying threads every time, so thread pool would be good. maybe use https://github.com/hosseinmoein/Leopard ?
 
-namespace pmn {
+namespace trichi {
 struct MeshletId {
   uint32_t index;
   uint32_t level;
 
   bool operator==(const MeshletId& other) const { return index == other.index && level == other.level; }
 };
-}  // namespace pmn
+}  // namespace trichi
 
 template <>
-struct std::hash<pmn::MeshletId> {
-  std::size_t operator()(const pmn::MeshletId& id) const {
+struct std::hash<trichi::MeshletId> {
+  std::size_t operator()(const trichi::MeshletId& id) const {
     return std::hash<uint64_t>()(static_cast<uint64_t>(id.index) << 32) | id.level;
   }
 };
 
-namespace pmn {
+namespace trichi {
 
 [[nodiscard]] MeshletsBuffers build_meshlets(
     const std::vector<uint32_t>& indices,
@@ -214,7 +214,7 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuff
 }
 */
 
-void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
+void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
   const auto start_time = std::chrono::high_resolution_clock::now();
 
   if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
@@ -578,4 +578,4 @@ void create_dag(const std::vector<uint32_t>& indices, const std::vector<float>& 
   js_stream << "}" << std::endl;
 }
 
-}  // namespace pmn
+}  // namespace trichi

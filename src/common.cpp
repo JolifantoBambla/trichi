@@ -6,7 +6,7 @@
 
 #include "impl.hpp"
 
-namespace pmn {
+namespace trichi {
 [[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster, const std::vector<MeshletsBuffers>& lods) {
   const meshopt_Meshlet& meshlet = lods[cluster.lod].meshlets[cluster.index];
   std::unordered_map<uint64_t, int> edges{};
@@ -82,4 +82,4 @@ void init_dag_node(
   dagNode.bounds.error = error;
 }
 
-}  // namespace pmn
+}  // namespace trichi

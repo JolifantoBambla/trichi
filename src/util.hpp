@@ -2,8 +2,8 @@
 // Created by lukas on 28.08.24.
 //
 
-#ifndef PER_MESHLET_NUANCES_UTIL_HPP
-#define PER_MESHLET_NUANCES_UTIL_HPP
+#ifndef TRICHI_UTIL_HPP
+#define TRICHI_UTIL_HPP
 
 #include <algorithm>  // std::set_intersection
 #include <cstdint>    // uint64_t
@@ -12,7 +12,7 @@
 #include "BS_thread_pool.hpp"
 #endif
 
-namespace pmn {
+namespace trichi {
 [[nodiscard]] constexpr uint64_t pack_sorted(uint32_t a, uint32_t b) {
   return (static_cast<uint64_t>(std::min(a, b)) << 32) | std::max(a, b);
 }
@@ -60,6 +60,6 @@ size_t intersection_size(const T1& s1, const T2& s2) {
   std::set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
   return c.count;
 }
-}  // namespace pmn
+}  // namespace trichi
 
-#endif  //PER_MESHLET_NUANCES_UTIL_HPP
+#endif  //TRICHI_UTIL_HPP
