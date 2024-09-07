@@ -39,6 +39,9 @@ struct DagNode {
   size_t level = 0;
   std::vector<size_t> children{};
   ClusterBounds bounds{};
+  //Bounds parent{};
+  //Bounds bounds2{};
+  //ClusterCone cone{};
 };
 
 [[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster,

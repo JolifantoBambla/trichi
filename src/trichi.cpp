@@ -214,7 +214,7 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuff
 }
 */
 
-void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride) {
+void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params) {
   const auto start_time = std::chrono::high_resolution_clock::now();
 
   if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
@@ -223,14 +223,14 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
 
   // todo: should be params
-  const size_t max_vertices = 64;
-  const size_t max_triangles = 128;
-  const float cone_weight = 0.5;
-  const size_t max_num_clusters_per_group = 4;
-  const float simplify_target_index_count_threshold = 0.5f;
-  const size_t max_lod_count = 25;
-  const float min_target_error = 1e-2f;
-  const float max_target_error = 1.0f;
+  const size_t max_vertices = params.max_vertices;
+  const size_t max_triangles = params.max_triangles;
+  const float cone_weight = params.cone_weight;
+  const size_t max_num_clusters_per_group = params.max_num_clusters_per_group;
+  const float simplify_target_index_count_threshold = params.cone_weight;
+  const size_t max_lod_count = params.max_lod_count;
+  const float min_target_error = params.min_target_error;
+  const float max_target_error = params.max_target_error;
 
   LoopRunner loop_runner{std::thread::hardware_concurrency()};
 
@@ -448,6 +448,7 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   //  - output vertices in js file
   //  - output dag data in js file
 
+  /*
   std::vector<size_t> offsets{};
   lod_offsets.reserve(lods.size());
   MeshletsBuffers concatenated{};
@@ -576,6 +577,7 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   js_stream << "]),\n";
 
   js_stream << "}" << std::endl;
+  */
 }
 
 }  // namespace trichi

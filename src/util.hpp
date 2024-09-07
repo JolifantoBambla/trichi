@@ -8,9 +8,9 @@
 #include <algorithm>  // std::set_intersection
 #include <cstdint>    // uint64_t
 
-#ifdef PMN_PARALLEL
+#ifdef TRICHI_PARALLEL
 #include "BS_thread_pool.hpp"
-#endif
+#endif //TRICHI_PARALLEL
 
 namespace trichi {
 [[nodiscard]] constexpr uint64_t pack_sorted(uint32_t a, uint32_t b) {
@@ -20,26 +20,26 @@ namespace trichi {
 class LoopRunner {
  public:
   explicit LoopRunner(size_t thread_count)
-#ifdef PMN_PARALLEL
+#ifdef TRICHI_PARALLEL
       : thread_pool(thread_count)
-#endif
+#endif //TRICHI_PARALLEL
   {}
 
   template<typename Body>
   void loop(size_t start, size_t end, Body&& body) {
-#ifdef PMN_PARALLEL
+#ifdef TRICHI_PARALLEL
     thread_pool.detach_loop<size_t>(start, end, body);
     thread_pool.wait();
 #else
     for (size_t i = start; i < end; ++i) {
       body(i);
     }
-#endif
+#endif //TRICHI_PARALLEL
   }
  private:
-#ifdef PMN_PARALLEL
+#ifdef TRICHI_PARALLEL
   BS::thread_pool thread_pool;
-#endif
+#endif //TRICHI_PARALLEL
 };
 
 // https://stackoverflow.com/questions/32640327/how-to-compute-the-size-of-an-intersection-of-two-stl-sets-in-c

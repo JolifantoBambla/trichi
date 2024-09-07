@@ -18,6 +18,61 @@ struct Graph {
   bool is_contiguous;
 };
 
+[[nodiscard]] Graph build_cluster_graph_par(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
+  const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
+  // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
+  std::atomic<size_t> no_neighbors_count = 0;
+  std::atomic<size_t> adjacency_size = 0;
+
+  std::vector<idx_t> xadj( clusters.size() + 1, 0);
+
+  std::vector<std::vector<idx_t>> adjacency{clusters.size()};
+  std::vector<std::vector<idx_t>> adjwght{clusters.size()};
+
+  loop_runner.loop(0, boundaries.size(), [&](size_t i) {
+    const auto& boundary = boundaries[i];
+
+    // loop over vertices that have not been processed yet
+    for (size_t j = 0; j < boundaries.size(); ++j) {
+      if (j == i) {
+        continue;
+      }
+      if (const auto shared_boundary_length = intersection_size(boundary, boundaries[j]); shared_boundary_length > 0) {
+        ++xadj[i + 1];
+        adjacency[i].push_back(static_cast<idx_t>(j));
+        adjwght[i].push_back(static_cast<idx_t>(shared_boundary_length));
+      }
+    }
+    // todo: remove(debug) or handle?
+    if (adjacency[i].empty()) {
+      ++no_neighbors_count;
+    }
+    adjacency_size += adjacency[i].size();
+  });
+
+  if (no_neighbors_count > 0) {
+    printf("no neighbors; %i of %i\n", int(no_neighbors_count), int(boundaries.size()));
+  }
+
+  std::vector<idx_t> adjacency_flat{};
+  std::vector<idx_t> adjwght_flat{};
+  adjacency_flat.reserve(adjacency_size);
+  adjwght_flat.reserve(adjacency_size);
+
+  for (size_t i = 0; i < boundaries.size(); ++i) {
+    xadj[i + 1] += xadj[i];
+    adjacency_flat.insert(adjacency_flat.cend(), adjacency[i].cbegin(), adjacency[i].cend());
+    adjwght_flat.insert(adjwght_flat.cend(), adjwght[i].cbegin(), adjwght[i].cend());
+  }
+
+  return Graph{
+      .xadj = std::move(xadj),
+      .adjacency = std::move(adjacency_flat),
+      .adjwght = std::move(adjwght_flat),
+      .is_contiguous = no_neighbors_count == 0,
+  };
+}
+
 [[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
   const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
 
@@ -159,6 +214,12 @@ struct Graph {
     const std::vector<MeshletsBuffers>& lods,
     size_t max_clusters_per_group,
     LoopRunner& loop_runner) {
-  return std::move(partition_graph(std::move(build_cluster_graph(clusters, lods, loop_runner)), max_clusters_per_group));
+  return std::move(partition_graph(
+#ifdef TRICHI_PARALLEL
+      std::move(build_cluster_graph_par(clusters, lods, loop_runner)),
+#else
+      std::move(build_cluster_graph(clusters, lods, loop_runner)),
+#endif //TRICHI_PARALLEL
+      max_clusters_per_group));
 }
 }  // namespace trichi
