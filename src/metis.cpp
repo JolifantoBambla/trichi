@@ -18,120 +18,65 @@ struct Graph {
   bool is_contiguous;
 };
 
-[[nodiscard]] Graph build_cluster_graph_par(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
-  const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
-  // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
-  std::atomic<size_t> no_neighbors_count = 0;
-  std::atomic<size_t> adjacency_size = 0;
-
-  std::vector<idx_t> xadj( clusters.size() + 1, 0);
-
-  std::vector<std::vector<idx_t>> adjacency{clusters.size()};
-  std::vector<std::vector<idx_t>> adjwght{clusters.size()};
-
-  loop_runner.loop(0, boundaries.size(), [&](size_t i) {
-    const auto& boundary = boundaries[i];
-
-    // loop over vertices that have not been processed yet
-    for (size_t j = 0; j < boundaries.size(); ++j) {
-      if (j == i) {
-        continue;
-      }
-      if (const auto shared_boundary_length = intersection_size(boundary, boundaries[j]); shared_boundary_length > 0) {
-        ++xadj[i + 1];
-        adjacency[i].push_back(static_cast<idx_t>(j));
-        adjwght[i].push_back(static_cast<idx_t>(shared_boundary_length));
-      }
-    }
-    // todo: remove(debug) or handle?
-    if (adjacency[i].empty()) {
-      ++no_neighbors_count;
-    }
-    adjacency_size += adjacency[i].size();
-  });
-
-  if (no_neighbors_count > 0) {
-    printf("no neighbors; %i of %i\n", int(no_neighbors_count), int(boundaries.size()));
-  }
-
-  std::vector<idx_t> adjacency_flat{};
-  std::vector<idx_t> adjwght_flat{};
-  adjacency_flat.reserve(adjacency_size);
-  adjwght_flat.reserve(adjacency_size);
-
-  for (size_t i = 0; i < boundaries.size(); ++i) {
-    xadj[i + 1] += xadj[i];
-    adjacency_flat.insert(adjacency_flat.cend(), adjacency[i].cbegin(), adjacency[i].cend());
-    adjwght_flat.insert(adjwght_flat.cend(), adjwght[i].cbegin(), adjwght[i].cend());
-  }
-
-  return Graph{
-      .xadj = std::move(xadj),
-      .adjacency = std::move(adjacency_flat),
-      .adjwght = std::move(adjwght_flat),
-      .is_contiguous = no_neighbors_count == 0,
-  };
-}
-
 [[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
   const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
 
-  // compute metis inputs here as well (xadj is exclusive scan of node degrees, adjacency is list of neighboring node indices, adjwght is list of edge weights)
-  std::atomic<size_t> no_neighbors_count = 0;
-  std::atomic<size_t> no_neighbors_count2 = 0;
-  std::vector<std::unordered_map<size_t, size_t>> graph_edge_weights{};
-  graph_edge_weights.reserve(clusters.size());
-  std::vector<idx_t> xadj = {0};
-  xadj.reserve(clusters.size() + 1);
-  std::vector<idx_t> adjacency{};
-  std::vector<idx_t> adjwght{};
+  std::atomic<size_t> adjacency_size = 0;
 
-  // todo: parallelize - either brute force set intersection n^2 but parallel or split into a parallel set intersection and a sequential resolving loop (or a parallel exclusive sum and a parallel resolving loop - could be overkill who knows)
-  for (size_t i = 0; i < boundaries.size(); ++i) {
+  std::vector<idx_t> valence_forward( clusters.size(), 0);
+  std::vector<std::vector<idx_t>> adjacency_forward{clusters.size()};
+  std::vector<std::vector<idx_t>> adjwght_forward{clusters.size()};
+
+  // forward pass on adjacency edge weights - this is expensive, so we do this in parallel
+  // (doing a parallel forward and a sequential resolve pass is ~5s faster for 4m tris than doing a parallel bidirectional pass on my machine)
+  loop_runner.loop(0, boundaries.size(), [&](size_t i) {
     const auto& boundary = boundaries[i];
-
-    graph_edge_weights.emplace_back();
-    auto& node_edge_weights = graph_edge_weights.back();
-
-    xadj.push_back(xadj[i]);
-
-    // loop over vertices that have already been processed (need to store both (u,v) & (v,u))
-    for (size_t j = 0; j < i; ++j) {
-      if (graph_edge_weights[j].contains(i)) {
-        ++xadj[i + 1];
-        adjacency.push_back(static_cast<idx_t>(j));
-        adjwght.push_back(static_cast<idx_t>(graph_edge_weights[j][i]));
-        node_edge_weights[j] = graph_edge_weights[j][i];
-      }
-    }
-
     // loop over vertices that have not been processed yet
     for (size_t j = i + 1; j < boundaries.size(); ++j) {
-      const auto shared_boundary_length = intersection_size(boundary, boundaries[j]);
-      if (shared_boundary_length > 0) {
-        ++xadj[i + 1];
-        adjacency.push_back(static_cast<idx_t>(j));
-        adjwght.push_back(static_cast<idx_t>(shared_boundary_length));
-        node_edge_weights[j] = shared_boundary_length;
+      if (const auto shared_boundary_length = intersection_size(boundary, boundaries[j]); shared_boundary_length > 0) {
+        ++valence_forward[i];
+        adjacency_forward[i].push_back(static_cast<idx_t>(j));
+        adjwght_forward[i].push_back(static_cast<idx_t>(shared_boundary_length));
       }
     }
+    adjacency_size += adjacency_forward[i].size() * 2;
+  });
 
-    // todo: remove (debug) - or maybe handle this?
-    if ((xadj[i + 1] - xadj[i]) == 0) {
-      ++no_neighbors_count;
-      // todo: if mesh is broken, boundary can't be determined by comparing indices -> either let user fix their mesh or add compatibility mode that tries to find neighboring meshlets by comparing their vertex positions
-      printf("%i: no neighbors\n", int(i));
+  bool is_contiguous = true;
+
+  // stores the resolved adjacency_forward & edge weights
+  std::vector<idx_t> xadj( clusters.size() + 1, 0);
+  std::vector<idx_t> adjacency{};
+  std::vector<idx_t> adjwght{};
+  adjacency.reserve(adjacency_size);
+  adjwght.reserve(adjacency_size);
+
+  // temp vectors to store adjacency_forward & edge weights from earlier nodes (we need each edge in both directions)
+  std::vector<std::vector<idx_t>> adjacency_prev{clusters.size()};
+  std::vector<std::vector<idx_t>> adjwght_prev{clusters.size()};
+
+  // resolve adjacency_forward & edge weights
+  for (size_t i = 0; i < boundaries.size(); ++i) {
+    const idx_t valence = valence_forward[i] + static_cast<idx_t>(adjacency_prev[i].size());
+    if (valence == 0) {
+      is_contiguous = false;
     }
-    if (graph_edge_weights[i].empty()) {
-      ++no_neighbors_count2;
+    xadj[i + 1] += valence + xadj[i];
+    for (size_t j = 0; j < adjacency_forward[i].size(); ++j) {
+      adjacency_prev[adjacency_forward[i][j]].push_back(static_cast<idx_t>(i));
+      adjwght_prev[adjacency_forward[i][j]].push_back(adjwght_forward[i][j]);
     }
+    adjacency.insert(adjacency.cend(), adjacency_prev[i].cbegin(), adjacency_prev[i].cend());
+    adjwght.insert(adjwght.cend(), adjwght_prev[i].cbegin(), adjwght_prev[i].cend());
+    adjacency.insert(adjacency.cend(), adjacency_forward[i].cbegin(), adjacency_forward[i].cend());
+    adjwght.insert(adjwght.cend(), adjwght_forward[i].cbegin(), adjwght_forward[i].cend());
   }
 
   return Graph{
       .xadj = std::move(xadj),
       .adjacency = std::move(adjacency),
       .adjwght = std::move(adjwght),
-      .is_contiguous = no_neighbors_count == 0,
+      .is_contiguous = is_contiguous,
   };
 }
 
@@ -215,11 +160,7 @@ struct Graph {
     size_t max_clusters_per_group,
     LoopRunner& loop_runner) {
   return std::move(partition_graph(
-#ifdef TRICHI_PARALLEL
-      std::move(build_cluster_graph_par(clusters, lods, loop_runner)),
-#else
       std::move(build_cluster_graph(clusters, lods, loop_runner)),
-#endif //TRICHI_PARALLEL
       max_clusters_per_group));
 }
 }  // namespace trichi
