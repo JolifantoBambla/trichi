@@ -9,7 +9,7 @@
 #include <vector>
 
 namespace trichi {
-
+// todo: no defaults
 struct TrichiParams {
   size_t max_vertices = 64;
   size_t max_triangles = 128;
@@ -22,14 +22,21 @@ struct TrichiParams {
 };
 
 struct ErrorBounds {
-  float center[3];
-  float radius;
+  float center[3]{};
+  float radius{};
   float error = 0.0;
+};
+
+struct NormalCone {
+  float cone_apex[3];
+  float cone_axis[3];
+  float cone_cutoff;
 };
 
 struct NodeErrorBounds {
   ErrorBounds parent_error;
   ErrorBounds cluster_error;
+  NormalCone normal_cone{};
 };
 
 struct Node {
@@ -39,38 +46,23 @@ struct Node {
 /**
  * Shadows meshopt_Meshlet
  */
-struct Cluster2 {
+struct Cluster {
   unsigned int vertex_offset;
   unsigned int triangle_offset;
   unsigned int vertex_count;
   unsigned int triangle_count;
 };
 
-/**
- * Shadows meshopt_Bounds
- */
-struct Cluster2Bounds {
-  float center[3];
-  float radius;
-  float cone_apex[3];
-  float cone_axis[3];
-  float cone_cutoff;
-  signed char cone_axis_s8[3];
-  signed char cone_cutoff_s8;
-};
-
 struct ClusterHierarchy {
   std::vector<Node> nodes;
   std::vector<size_t> root_nodes;
   std::vector<NodeErrorBounds> node_errors;
-  std::vector<Cluster2> clusters;
+  std::vector<Cluster> clusters;
   std::vector<uint32_t> vertices;
   std::vector<uint8_t> triangles;
-  std::vector<Cluster2Bounds> bounds;
 };
 
-// todo: no defaults
-void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params = {});
+[[nodiscard]] ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params = {});
 }
 
 #endif  //TRICHI_HPP

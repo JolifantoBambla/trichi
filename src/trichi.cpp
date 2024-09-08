@@ -30,13 +30,16 @@ namespace trichi {
     float cone_weight) {
   size_t max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_vertices, max_triangles);
   MeshletsBuffers meshlets = {
-      .meshlets = std::vector<meshopt_Meshlet>(max_meshlets),
+      .clusters = {},
       .vertices = std::vector<unsigned int>(max_meshlets * max_vertices),
       .triangles = std::vector<unsigned char>(max_meshlets * max_triangles * 3),
   };
 
-  meshlets.meshlets.resize(meshopt_buildMeshlets(
-      meshlets.meshlets.data(),
+  std::vector<meshopt_Meshlet> mmeshlets{max_meshlets};
+
+  // building the meshlets for lod 0 is the most time-consuming operation, guess there is not much more to do when it comes to performance optimization
+  mmeshlets.resize(meshopt_buildMeshlets(
+      mmeshlets.data(),
       meshlets.vertices.data(),
       meshlets.triangles.data(),
       indices.data(),
@@ -48,10 +51,19 @@ namespace trichi {
       max_triangles,
       cone_weight));
 
-  const auto& last = meshlets.meshlets.back();
+  // perf cost of this transform is insignificant
+  std::transform(std::make_move_iterator(mmeshlets.cbegin()), std::make_move_iterator(mmeshlets.cend()), std::back_inserter(meshlets.clusters), [](const auto& meshlet) {
+    return Cluster {
+      .vertex_offset = meshlet.vertex_offset,
+      .triangle_offset = meshlet.triangle_offset,
+      .vertex_count = meshlet.vertex_count,
+      .triangle_count = meshlet.triangle_count,
+    };
+  });
+
+  const auto& last = meshlets.clusters.back();
   meshlets.vertices.resize(last.vertex_offset + last.vertex_count);
   meshlets.triangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
-  meshlets.bounds.resize(meshlets.meshlets.size());
 
   return std::move(meshlets);
 }
@@ -67,22 +79,14 @@ namespace trichi {
     size_t max_meshlets) {
   auto meshlets = build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
 
-  if (meshlets.meshlets.size() <= max_meshlets) {
-    for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
-      const auto& meshlet = meshlets.meshlets[i];
+  if (meshlets.clusters.size() <= max_meshlets) {
+    for (size_t i = 0; i < meshlets.clusters.size(); ++i) {
+      const auto& meshlet = meshlets.clusters[i];
       meshopt_optimizeMeshlet(
           &meshlets.vertices[meshlet.vertex_offset],
           &meshlets.triangles[meshlet.triangle_offset],
           meshlet.triangle_count,
           meshlet.vertex_count);
-
-      meshlets.bounds[i] = meshopt_computeMeshletBounds(
-          &meshlets.vertices[meshlet.vertex_offset],
-          &meshlets.triangles[meshlet.triangle_offset],
-          meshlet.triangle_count,
-          vertices.data(),
-          vertex_count,
-          vertex_stride);
     }
   }
 
@@ -102,7 +106,7 @@ merge_group(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lo
   group_indices.reserve(3 * max_triangles * group.size());
   for (const auto& meshlet_index : group) {
     const auto& cluster = clusters[meshlet_index];
-    const auto& meshlet = lods.meshlets[cluster.index];
+    const auto& meshlet = lods.clusters[cluster.index];
     if (meshlet.triangle_offset + (meshlet.triangle_count * 3) > lods.triangles.size()) {
       throw std::runtime_error("fuck");
     }
@@ -143,7 +147,7 @@ merge_group(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lo
   return std::make_pair(std::move(simplified_indices), simplification_error);
 }
 
-void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params) {
+ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params) {
   const auto start_time = std::chrono::high_resolution_clock::now();
 
   if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
@@ -160,27 +164,26 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
 
   LoopRunner loop_runner{std::thread::hardware_concurrency()};
 
-  const float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
+  //const float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
   std::vector<size_t> lod_offsets = {0};
-  ClusterHierarchy dag{};
 
 
   MeshletsBuffers lods = build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
-  std::vector<DagNode> dagNodes(lods.meshlets.size());
-  std::vector<NodeErrorBounds> node_error_bounds(lods.meshlets.size());
-  std::vector<Node> nodes(lods.meshlets.size());
+  std::vector<NodeErrorBounds> node_error_bounds(lods.clusters.size());
+  //std::vector<Node> nodes{};
 
-  std::vector<ClusterIndex> cluster_pool(lods.meshlets.size());
+  std::vector<ClusterIndex> cluster_pool(lods.clusters.size());
 
   loop_runner.loop(0, cluster_pool.size(), [&](size_t i) {
-    const auto& meshlet = lods.meshlets[i];
+    const auto& meshlet = lods.clusters[i];
     meshopt_optimizeMeshlet(
         &lods.vertices[meshlet.vertex_offset],
         &lods.triangles[meshlet.triangle_offset],
         meshlet.triangle_count,
         meshlet.vertex_count);
-    lods.bounds[i] = meshopt_computeMeshletBounds(
+
+    const auto cluster_bounds = meshopt_computeMeshletBounds(
         &lods.vertices[meshlet.vertex_offset],
         &lods.triangles[meshlet.triangle_offset],
         meshlet.triangle_count,
@@ -188,11 +191,17 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
         vertex_count,
         vertex_stride);
 
-    node_error_bounds[i].cluster_error.center[0] = lods.bounds[i].center[0];
-    node_error_bounds[i].cluster_error.center[1] = lods.bounds[i].center[1];
-    node_error_bounds[i].cluster_error.center[2] = lods.bounds[i].center[2];
-    node_error_bounds[i].cluster_error.radius = lods.bounds[i].radius;
+    node_error_bounds[i].cluster_error.center[0] = cluster_bounds.center[0];
+    node_error_bounds[i].cluster_error.center[1] = cluster_bounds.center[1];
+    node_error_bounds[i].cluster_error.center[2] = cluster_bounds.center[2];
+    node_error_bounds[i].cluster_error.radius = cluster_bounds.radius;
     node_error_bounds[i].cluster_error.error = 0.0;
+    node_error_bounds[i].normal_cone.cone_apex[0] = cluster_bounds.cone_apex[0];
+    node_error_bounds[i].normal_cone.cone_apex[1] = cluster_bounds.cone_apex[1];
+    node_error_bounds[i].normal_cone.cone_apex[2] = cluster_bounds.cone_apex[2];
+    node_error_bounds[i].normal_cone.cone_axis[0] = cluster_bounds.cone_axis[0];
+    node_error_bounds[i].normal_cone.cone_axis[1] = cluster_bounds.cone_axis[1];
+    node_error_bounds[i].normal_cone.cone_axis[2] = cluster_bounds.cone_axis[2];
 
     cluster_pool[i] = ClusterIndex{
         .index = i,
@@ -205,16 +214,14 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
     if (cluster_pool.size() <= 1) {
       break;
     }
-    lod_offsets.emplace_back(lods.meshlets.size());
+    lod_offsets.emplace_back(lods.clusters.size());
 
     bool is_last = cluster_pool.size() <= max_num_clusters_per_group;
 
     const auto groups = is_last ? build_final_cluster_group(cluster_pool.size())
                                 : group_clusters(cluster_pool, lods, max_num_clusters_per_group, loop_runner);
 
-    // todo: how should we set the target error? should this depend on lod?
-    //const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
-    const float simplify_target_error = std::numeric_limits<float>::max(); // std::lerp(min_target_error, max_target_error, lod_scale) * simplify_scale;
+    const float simplify_target_error = std::numeric_limits<float>::max();
 
     std::atomic_size_t num_new_meshlets = 0;
     std::atomic_size_t num_new_vertices = 0;
@@ -224,7 +231,8 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
 
     std::vector<MeshletsBuffers> lod_meshlets(groups.size());
     std::vector<std::vector<ClusterIndex>> lod_clusters(groups.size());
-    std::vector<DagNode> lod_dag_nodes(groups.size() * 4);
+    std::vector<std::vector<NodeErrorBounds>> lod_error_bounds(groups.size());
+    //std::vector<std::vector<Node>> lod_nodes(groups.size());
     loop_runner.loop(0, groups.size(), [&](const size_t i) {
       const auto& group = groups[i];
       if (group.empty()) {
@@ -252,43 +260,57 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
               cone_weight,
               group.size() - 1));
 
-          simplified = group_meshlets.meshlets.size() < group.size();
+          simplified = group_meshlets.clusters.size() < group.size();
 
           if (simplified) {
-            size_t node_offset = num_new_meshlets.fetch_add(group_meshlets.meshlets.size());
+            size_t node_offset = num_new_meshlets.fetch_add(group_meshlets.clusters.size());
             num_new_vertices += group_meshlets.vertices.size();
             num_new_triangles += group_meshlets.triangles.size();
-            num_next_clusters += group_meshlets.meshlets.size();
+            num_next_clusters += group_meshlets.clusters.size();
 
-            // todo: error
-            //  - all cluster_pool in group must have same sphere bounds & error
-            //  - parent group sphere bounds must encompass all child vertices (=! group sphere bounds because 3d)
+            meshopt_Bounds group_bounds = meshopt_computeClusterBounds(
+                group_indices.data(),
+                group_indices.size(),
+                vertices.data(),
+                vertex_count,
+                vertex_stride);
 
-            ErrorBounds group_error_bounds = node_error_bounds[cluster_pool[group[0]].index].cluster_error;
-            group_error_bounds.error = std::max(group_error_bounds.error, error);
-            for (size_t j = 1; j < group.size(); ++j) {
-              const auto& child_error = node_error_bounds[cluster_pool[group[j]].index].cluster_error;
-              group_error_bounds.error = std::max(group_error_bounds.error, child_error.error);
-
-              float dir[3] = {
-                  child_error.center[0] - group_error_bounds.center[0],
-                  child_error.center[1] - group_error_bounds.center[1],
-                  child_error.center[2] - group_error_bounds.center[2],
-              };
-              float dist = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-              if ((dist + child_error.radius) > group_error_bounds.radius) {
-                // todo: grow sphere
-              }
-            }
-
-            // parent group error must be at least as large as the largest child error
-            float dag_node_error = std::accumulate(
+            ErrorBounds group_error_bounds{};
+            group_error_bounds.error = std::accumulate(
                 group.cbegin(),
                 group.cend(),
                 error,
                 [&cluster_pool, &node_error_bounds](const float max_error, const size_t cluster_index) {
                   return std::max(max_error, node_error_bounds[cluster_pool[cluster_index].index].cluster_error.error);
                 });
+            group_error_bounds.center[0] = group_bounds.center[0];
+            group_error_bounds.center[1] = group_bounds.center[1];
+            group_error_bounds.center[2] = group_bounds.center[2];
+            group_error_bounds.radius = group_bounds.radius;
+
+            for (size_t cluster_index = 0; cluster_index < group_meshlets.clusters.size(); ++cluster_index) {
+              const auto& meshlet = group_meshlets.clusters[cluster_index];
+              const auto cluster_bounds = meshopt_computeMeshletBounds(
+                  &group_meshlets.vertices[meshlet.vertex_offset],
+                  &group_meshlets.triangles[meshlet.triangle_offset],
+                  meshlet.triangle_count,
+                  vertices.data(),
+                  vertex_count,
+                  vertex_stride);
+
+              auto& node_bounds = lod_error_bounds[i].emplace_back();
+              node_bounds.cluster_error.center[0] = cluster_bounds.center[0];
+              node_bounds.cluster_error.center[1] = cluster_bounds.center[1];
+              node_bounds.cluster_error.center[2] = cluster_bounds.center[2];
+              node_bounds.cluster_error.radius = cluster_bounds.radius;
+              node_bounds.cluster_error.error = error;
+              node_bounds.normal_cone.cone_apex[0] = cluster_bounds.cone_apex[0];
+              node_bounds.normal_cone.cone_apex[1] = cluster_bounds.cone_apex[1];
+              node_bounds.normal_cone.cone_apex[2] = cluster_bounds.cone_apex[2];
+              node_bounds.normal_cone.cone_axis[0] = cluster_bounds.cone_axis[0];
+              node_bounds.normal_cone.cone_axis[1] = cluster_bounds.cone_axis[1];
+              node_bounds.normal_cone.cone_axis[2] = cluster_bounds.cone_axis[2];
+            }
 
             /*
             std::vector<size_t> child_dag_indices(group.size());
@@ -297,16 +319,29 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
             }
              */
 
-            for (size_t cluster_index = 0; cluster_index < group_meshlets.meshlets.size(); ++cluster_index) {
-              const size_t dag_node_index = node_offset + cluster_index;
-              const auto& cluster = lod_clusters[i].emplace_back(ClusterIndex{
+            for (size_t cluster_index = 0; cluster_index < group_meshlets.clusters.size(); ++cluster_index) {
+              // I'm not sure if I understood that correctly from the Nanite slides: the parent has to conservatively bound their children
+              // but should its own cluster error then also be the group error? I don't think so because then cluster bounds would be way too large would they not?
+              // I think clusters in the group only need to share the same parent bound but have their own bounds too
+
+              // grow bounding sphere to enclose all its children's bounding spheres - this is not minimal anymore but should be good enough for lod decision?
+              const auto& cluster_error = node_error_bounds[cluster_pool[cluster_index].index].cluster_error;
+              const float c1c2[3] = {
+                  cluster_error.center[0] - group_error_bounds.center[0],
+                  cluster_error.center[1] - group_error_bounds.center[1],
+                  cluster_error.center[2] - group_error_bounds.center[2],
+              };
+              const float dist = std::sqrt(c1c2[0] * c1c2[0] + c1c2[1] * c1c2[1] + c1c2[2] * c1c2[2]);
+              group_error_bounds.radius = std::max(group_error_bounds.radius, dist + cluster_error.radius);
+
+              lod_clusters[i].emplace_back(ClusterIndex{
                   .index = cluster_index,
                   .lod = level,
               });
-              auto& node = lod_dag_nodes[dag_node_index];
-              init_dag_node(
-                  cluster, group_meshlets, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
-              //node.children.insert(node.children.end(), child_dag_indices.cbegin(), child_dag_indices.cend());
+            }
+
+            for (size_t cluster_index = 0; cluster_index < group_meshlets.clusters.size(); ++cluster_index) {
+              node_error_bounds[cluster_pool[cluster_index].index].parent_error = group_error_bounds;
             }
 
             lod_meshlets[i] = std::move(group_meshlets);
@@ -324,30 +359,30 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
     });
 
     std::vector<ClusterIndex> next_clusters{};
-    // merge meshlets & prepare next iteration's cluster_pool
+    // merge clusters & prepare next iteration's cluster_pool
     {
       next_clusters.reserve(num_next_clusters);
 
-      lods.meshlets.reserve(lods.meshlets.size() + num_new_meshlets);
+      lods.clusters.reserve(lods.clusters.size() + num_new_meshlets);
       lods.vertices.reserve(lods.vertices.size() + num_new_vertices);
       lods.triangles.reserve(lods.triangles.size() + num_new_triangles);
 
       for (size_t i = 0; i < groups.size(); ++i) {
-        if (!lod_meshlets[i].meshlets.empty()) {
+        if (!lod_meshlets[i].clusters.empty()) {
           for (size_t cluster_index = 0; cluster_index < lod_clusters[i].size(); ++cluster_index) {
             auto& cluster = lod_clusters[i][cluster_index];
             if (cluster.lod != level) {
               continue;
             }
-            cluster.index += lods.meshlets.size();
+            cluster.index += lods.clusters.size();
 
-            lod_meshlets[i].meshlets[cluster_index].vertex_offset += lods.vertices.size();
-            lod_meshlets[i].meshlets[cluster_index].triangle_offset += lods.triangles.size();
+            lod_meshlets[i].clusters[cluster_index].vertex_offset += lods.vertices.size();
+            lod_meshlets[i].clusters[cluster_index].triangle_offset += lods.triangles.size();
           }
-          lods.meshlets.insert(
-              lods.meshlets.cend(),
-              std::make_move_iterator(lod_meshlets[i].meshlets.cbegin()),
-              std::make_move_iterator(lod_meshlets[i].meshlets.cend()));
+          lods.clusters.insert(
+              lods.clusters.cend(),
+              std::make_move_iterator(lod_meshlets[i].clusters.cbegin()),
+              std::make_move_iterator(lod_meshlets[i].clusters.cend()));
           lods.vertices.insert(
               lods.vertices.cend(),
               std::make_move_iterator(lod_meshlets[i].vertices.cbegin()),
@@ -356,6 +391,10 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
               lods.triangles.cend(),
               std::make_move_iterator(lod_meshlets[i].triangles.cbegin()),
               std::make_move_iterator(lod_meshlets[i].triangles.cend()));
+          node_error_bounds.insert(
+              node_error_bounds.cend(),
+              std::make_move_iterator(lod_error_bounds[i].cbegin()),
+              std::make_move_iterator(lod_error_bounds[i].cend()));
         }
         next_clusters.insert(
             next_clusters.cend(),
@@ -363,14 +402,8 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
             std::make_move_iterator(lod_clusters[i].cend()));
       }
 
-      dagNodes.reserve(dagNodes.size() + num_new_meshlets);
-      dagNodes.insert(
-          dagNodes.cend(),
-          std::make_move_iterator(lod_dag_nodes.cbegin()),
-          std::make_move_iterator(lod_dag_nodes.cbegin() + static_cast<off_t>(num_new_meshlets)));
-
       printf(
-          "num meshlets: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
+          "num clusters: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
           int(level),
           int(num_new_meshlets),
           int(level - 1),
@@ -396,10 +429,10 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   }
 
   /*
-  if (!lods.empty() && lods.back().meshlets.empty()) {
+  if (!lods.empty() && lods.back().clusters.empty()) {
     lods.resize(lods.size() - 1);
   }
-  size_t num_root_nodes = lods.back().meshlets.size();
+  size_t num_root_nodes = lods.back().clusters.size();
 
   const auto root = dagNodes.back();
    */
@@ -417,7 +450,7 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
       std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count());
 
   // todo: for now to quickly have a demo
-  //  - output all meshlet data as js file (concatenate meshlets, vertices, triangles)
+  //  - output all meshlet data as js file (concatenate clusters, vertices, triangles)
   //  - output vertices in js file
   //  - output dag data in js file
 
@@ -427,16 +460,16 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   MeshletsBuffers concatenated{};
   for (size_t i = 0; i < lods.size(); ++i) {
     printf(
-        "%i meshlets %i vertices %i triangles\n",
-        int(lods[i].meshlets.size()),
+        "%i clusters %i vertices %i triangles\n",
+        int(lods[i].clusters.size()),
         int(lods[i].vertices.size()),
         int(lods[i].triangles.size()));
-    offsets.push_back(concatenated.meshlets.size());
+    offsets.push_back(concatenated.clusters.size());
     if (i == 0) {
-      concatenated.meshlets.insert(concatenated.meshlets.cend(), lods[i].meshlets.cbegin(), lods[i].meshlets.cend());
+      concatenated.clusters.insert(concatenated.clusters.cend(), lods[i].clusters.cbegin(), lods[i].clusters.cend());
     } else {
       std::transform(
-          lods[i].meshlets.cbegin(), lods[i].meshlets.cend(), std::back_inserter(concatenated.meshlets), [&](auto m) {
+          lods[i].clusters.cbegin(), lods[i].clusters.cend(), std::back_inserter(concatenated.clusters), [&](auto m) {
             m.vertex_offset += concatenated.vertices.size();
             m.triangle_offset += concatenated.triangles.size();
             return m;
@@ -445,8 +478,8 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
     concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cend());
     concatenated.triangles.insert(concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cend());
     printf(
-        "concatenated: %i meshlets %i vertices %i triangles\n",
-        int(concatenated.meshlets.size()),
+        "concatenated: %i clusters %i vertices %i triangles\n",
+        int(concatenated.clusters.size()),
         int(concatenated.vertices.size()),
         int(concatenated.triangles.size()));
   }
@@ -475,19 +508,19 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
 
   js_stream << "  strideFloats: " << vertex_stride / sizeof(float) << ",\n";
 
-  js_stream << "  meshlets: new Uint32Array([";
-  for (size_t i = 0; i < concatenated.meshlets.size(); ++i) {
-    if (i < lods[0].meshlets.size()) {
-      assert(concatenated.meshlets[i].vertex_offset == lods[0].meshlets[i].vertex_offset);
-      assert(concatenated.meshlets[i].triangle_offset == lods[0].meshlets[i].triangle_offset);
-      assert(concatenated.meshlets[i].vertex_count == lods[0].meshlets[i].vertex_count);
-      assert(concatenated.meshlets[i].triangle_count == lods[0].meshlets[i].triangle_count);
+  js_stream << "  clusters: new Uint32Array([";
+  for (size_t i = 0; i < concatenated.clusters.size(); ++i) {
+    if (i < lods[0].clusters.size()) {
+      assert(concatenated.clusters[i].vertex_offset == lods[0].clusters[i].vertex_offset);
+      assert(concatenated.clusters[i].triangle_offset == lods[0].clusters[i].triangle_offset);
+      assert(concatenated.clusters[i].vertex_count == lods[0].clusters[i].vertex_count);
+      assert(concatenated.clusters[i].triangle_count == lods[0].clusters[i].triangle_count);
     }
-    js_stream << concatenated.meshlets[i].vertex_offset << ",";
-    js_stream << concatenated.meshlets[i].triangle_offset << ",";
-    js_stream << concatenated.meshlets[i].vertex_count << ",";
-    js_stream << concatenated.meshlets[i].triangle_count;
-    if (i != concatenated.meshlets.size() - 1) {
+    js_stream << concatenated.clusters[i].vertex_offset << ",";
+    js_stream << concatenated.clusters[i].triangle_offset << ",";
+    js_stream << concatenated.clusters[i].vertex_count << ",";
+    js_stream << concatenated.clusters[i].triangle_count;
+    if (i != concatenated.clusters.size() - 1) {
       js_stream << ",";
     }
   }
@@ -526,7 +559,7 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   }
   js_stream << "]),\n";
 
-  js_stream << "  numMeshlets: " << concatenated.meshlets.size() << ",\n";
+  js_stream << "  numMeshlets: " << concatenated.clusters.size() << ",\n";
 
   js_stream << "  maxClusterTriangles: " << max_triangles << ",\n";
 
@@ -551,6 +584,16 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
 
   js_stream << "}" << std::endl;
   */
+
+  return ClusterHierarchy{
+      // todo
+      .nodes = {},
+      .root_nodes = {},
+      .node_errors = std::move(node_error_bounds),
+      .clusters = std::move(lods.clusters),
+      .vertices = std::move(lods.vertices),
+      .triangles = std::move(lods.triangles),
+  };
 }
 
 }  // namespace trichi

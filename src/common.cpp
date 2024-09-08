@@ -8,7 +8,7 @@
 
 namespace trichi {
 [[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const ClusterIndex& cluster, const MeshletsBuffers& lods) {
-  const meshopt_Meshlet& meshlet = lods.meshlets[cluster.index];
+  const auto& meshlet = lods.clusters[cluster.index];
   std::unordered_map<uint64_t, int> edges{};
   for (size_t i = 0; i < meshlet.triangle_count; ++i) {
     const size_t triangle_offset = meshlet.triangle_offset + i * 3;
@@ -50,36 +50,6 @@ void extract_boundary(const ClusterIndex& cluster, const MeshletsBuffers& lods, 
   std::vector<std::vector<uint64_t>> boundaries(clusters.size());
   loop_runner.loop(0, clusters.size(), [&clusters, &lods, &boundaries](const size_t i) { extract_boundary(clusters[i], lods, boundaries[i]); });
   return std::move(boundaries);
-}
-
-void init_dag_node(
-    const ClusterIndex& cluster,
-    const MeshletsBuffers& meshlets,
-    DagNode& dagNode,
-    const std::vector<float>& vertices,
-    size_t vertex_count,
-    size_t vertex_stride,
-    size_t cluster_index,
-    size_t level,
-    float error) {
-  const auto bounds = meshopt_computeMeshletBounds(
-      &meshlets.vertices[meshlets.meshlets[cluster.index].vertex_offset],
-      &meshlets.triangles[meshlets.meshlets[cluster.index].triangle_offset],
-      meshlets.meshlets[cluster.index].triangle_count,
-      vertices.data(),
-      vertex_count,
-      vertex_stride);
-
-  dagNode.clusterIndex = cluster_index;
-  dagNode.level = level;
-  dagNode.bounds.radius = bounds.radius;
-  dagNode.bounds.cone_cutoff = bounds.cone_cutoff;
-  for (size_t c = 0; c < 3; ++c) {
-    dagNode.bounds.center[c] = bounds.center[c];
-    dagNode.bounds.cone_apex[c] = bounds.center[c];
-    dagNode.bounds.cone_axis[c] = bounds.center[c];
-  }
-  dagNode.bounds.error = error;
 }
 
 }  // namespace trichi
