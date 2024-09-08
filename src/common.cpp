@@ -7,17 +7,17 @@
 #include "impl.hpp"
 
 namespace trichi {
-[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const Cluster& cluster, const std::vector<MeshletsBuffers>& lods) {
-  const meshopt_Meshlet& meshlet = lods[cluster.lod].meshlets[cluster.index];
+[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const ClusterIndex& cluster, const MeshletsBuffers& lods) {
+  const meshopt_Meshlet& meshlet = lods.meshlets[cluster.index];
   std::unordered_map<uint64_t, int> edges{};
   for (size_t i = 0; i < meshlet.triangle_count; ++i) {
     const size_t triangle_offset = meshlet.triangle_offset + i * 3;
     const uint32_t a =
-        lods[cluster.lod].vertices[meshlet.vertex_offset + lods[cluster.lod].triangles[triangle_offset + 0]];
+        lods.vertices[meshlet.vertex_offset + lods.triangles[triangle_offset + 0]];
     const uint32_t b =
-        lods[cluster.lod].vertices[meshlet.vertex_offset + lods[cluster.lod].triangles[triangle_offset + 1]];
+        lods.vertices[meshlet.vertex_offset + lods.triangles[triangle_offset + 1]];
     const uint32_t c =
-        lods[cluster.lod].vertices[meshlet.vertex_offset + lods[cluster.lod].triangles[triangle_offset + 2]];
+        lods.vertices[meshlet.vertex_offset + lods.triangles[triangle_offset + 2]];
     if (auto [edge, inserted] = edges.try_emplace(pack_sorted(a, b), 1); !inserted) {
       ++(edge->second);
     }
@@ -31,7 +31,7 @@ namespace trichi {
   return std::move(edges);
 }
 
-void extract_boundary(const Cluster& cluster, const std::vector<MeshletsBuffers>& lods, std::vector<uint64_t>& boundary) {
+void extract_boundary(const ClusterIndex& cluster, const MeshletsBuffers& lods, std::vector<uint64_t>& boundary) {
   // find edges
   const auto edges = extract_cluster_edges(cluster, lods);
 
@@ -46,14 +46,14 @@ void extract_boundary(const Cluster& cluster, const std::vector<MeshletsBuffers>
   std::sort(boundary.begin(), boundary.end());
 }
 
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
+[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lods, LoopRunner& loop_runner) {
   std::vector<std::vector<uint64_t>> boundaries(clusters.size());
   loop_runner.loop(0, clusters.size(), [&clusters, &lods, &boundaries](const size_t i) { extract_boundary(clusters[i], lods, boundaries[i]); });
   return std::move(boundaries);
 }
 
 void init_dag_node(
-    const Cluster& cluster,
+    const ClusterIndex& cluster,
     const MeshletsBuffers& meshlets,
     DagNode& dagNode,
     const std::vector<float>& vertices,

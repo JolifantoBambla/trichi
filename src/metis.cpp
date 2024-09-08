@@ -18,7 +18,7 @@ struct Graph {
   bool is_contiguous;
 };
 
-[[nodiscard]] Graph build_cluster_graph(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, LoopRunner& loop_runner) {
+[[nodiscard]] Graph build_cluster_graph(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lods, LoopRunner& loop_runner) {
   const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
 
   std::atomic<size_t> adjacency_size = 0;
@@ -155,8 +155,8 @@ struct Graph {
 }
 
 [[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
-    const std::vector<Cluster>& clusters,
-    const std::vector<MeshletsBuffers>& lods,
+    const std::vector<ClusterIndex>& clusters,
+    const MeshletsBuffers& lods,
     size_t max_clusters_per_group,
     LoopRunner& loop_runner) {
   return std::move(partition_graph(

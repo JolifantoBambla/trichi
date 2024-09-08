@@ -18,24 +18,6 @@
 #include "impl.hpp"
 #include "trichi.hpp"
 
-// todo: I have a lot of embarrassingly parallel steps in here - std::async adds a lot of overhead for creating and destroying threads every time, so thread pool would be good. maybe use https://github.com/hosseinmoein/Leopard ?
-
-namespace trichi {
-struct MeshletId {
-  uint32_t index;
-  uint32_t level;
-
-  bool operator==(const MeshletId& other) const { return index == other.index && level == other.level; }
-};
-}  // namespace trichi
-
-template <>
-struct std::hash<trichi::MeshletId> {
-  std::size_t operator()(const trichi::MeshletId& id) const {
-    return std::hash<uint64_t>()(static_cast<uint64_t>(id.index) << 32) | id.level;
-  }
-};
-
 namespace trichi {
 
 [[nodiscard]] MeshletsBuffers build_meshlets(
@@ -45,8 +27,7 @@ namespace trichi {
     size_t vertex_stride,
     size_t max_vertices,
     size_t max_triangles,
-    float cone_weight,
-    std::optional<size_t> max_allowed_meshlets = std::nullopt) {
+    float cone_weight) {
   size_t max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_vertices, max_triangles);
   MeshletsBuffers meshlets = {
       .meshlets = std::vector<meshopt_Meshlet>(max_meshlets),
@@ -54,7 +35,6 @@ namespace trichi {
       .triangles = std::vector<unsigned char>(max_meshlets * max_triangles * 3),
   };
 
-  const auto start_build_meshlets = std::chrono::high_resolution_clock::now();
   meshlets.meshlets.resize(meshopt_buildMeshlets(
       meshlets.meshlets.data(),
       meshlets.vertices.data(),
@@ -67,32 +47,43 @@ namespace trichi {
       max_vertices,
       max_triangles,
       cone_weight));
-  const auto end_build_meshlets = std::chrono::high_resolution_clock::now();
-  /*
-  printf(
-      "build meshlets: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_build_meshlets - start_build_meshlets).count());
-    */
 
   const auto& last = meshlets.meshlets.back();
   meshlets.vertices.resize(last.vertex_offset + last.vertex_count);
   meshlets.triangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
+  meshlets.bounds.resize(meshlets.meshlets.size());
 
-  if (max_allowed_meshlets.has_value() && meshlets.meshlets.size() <= max_allowed_meshlets.value()) {
-    const auto start_optimize_meshlets = std::chrono::high_resolution_clock::now();
-    for (const auto& meshlet : meshlets.meshlets) {
+  return std::move(meshlets);
+}
+
+[[nodiscard]] MeshletsBuffers build_parent_meshlets(
+    const std::vector<uint32_t>& indices,
+    const std::vector<float>& vertices,
+    size_t vertex_count,
+    size_t vertex_stride,
+    size_t max_vertices,
+    size_t max_triangles,
+    float cone_weight,
+    size_t max_meshlets) {
+  auto meshlets = build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+
+  if (meshlets.meshlets.size() <= max_meshlets) {
+    for (size_t i = 0; i < meshlets.meshlets.size(); ++i) {
+      const auto& meshlet = meshlets.meshlets[i];
       meshopt_optimizeMeshlet(
           &meshlets.vertices[meshlet.vertex_offset],
           &meshlets.triangles[meshlet.triangle_offset],
           meshlet.triangle_count,
           meshlet.vertex_count);
+
+      meshlets.bounds[i] = meshopt_computeMeshletBounds(
+          &meshlets.vertices[meshlet.vertex_offset],
+          &meshlets.triangles[meshlet.triangle_offset],
+          meshlet.triangle_count,
+          vertices.data(),
+          vertex_count,
+          vertex_stride);
     }
-    const auto end_optimize_meshlets = std::chrono::high_resolution_clock::now();
-    /*
-  printf(
-      "optimize meshlets: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_optimize_meshlets - start_optimize_meshlets).count());
-  */
   }
 
   return std::move(meshlets);
@@ -106,21 +97,21 @@ namespace trichi {
 }
 
 [[nodiscard]] std::vector<unsigned int>
-merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuffers>& lods, const std::vector<size_t>& group, size_t max_triangles) {
+merge_group(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lods, const std::vector<size_t>& group, size_t max_triangles) {
   std::vector<uint32_t> group_indices{};
   group_indices.reserve(3 * max_triangles * group.size());
   for (const auto& meshlet_index : group) {
     const auto& cluster = clusters[meshlet_index];
-    const auto& meshlet = lods[cluster.lod].meshlets[cluster.index];
-    if (meshlet.triangle_offset + (meshlet.triangle_count * 3) > lods[cluster.lod].triangles.size()) {
+    const auto& meshlet = lods.meshlets[cluster.index];
+    if (meshlet.triangle_offset + (meshlet.triangle_count * 3) > lods.triangles.size()) {
       throw std::runtime_error("fuck");
     }
     std::transform(
-        lods[cluster.lod].triangles.cbegin() + meshlet.triangle_offset,
-        lods[cluster.lod].triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
+        lods.triangles.cbegin() + meshlet.triangle_offset,
+        lods.triangles.cbegin() + meshlet.triangle_offset + (meshlet.triangle_count * 3),
         std::back_inserter(group_indices),
-        [&cluster, &lods, &meshlet](const auto& vertex_index) {
-          return lods[cluster.lod].vertices[meshlet.vertex_offset + vertex_index];
+        [&lods, &meshlet](const auto& vertex_index) {
+          return lods.vertices[meshlet.vertex_offset + vertex_index];
         });
   }
   return std::move(group_indices);
@@ -165,41 +156,61 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   const float cone_weight = params.cone_weight;
   const size_t max_num_clusters_per_group = params.max_num_clusters_per_group;
   const size_t simplify_target_index_count = std::min(max_vertices, max_triangles) * 3 * 2;
-  const float simplify_target_index_count_threshold = params.simplify_target_index_count_threshold;
   const size_t max_lod_count = params.max_lod_count;
-  const float min_target_error = params.min_target_error;
-  const float max_target_error = params.max_target_error;
 
   LoopRunner loop_runner{std::thread::hardware_concurrency()};
 
-  float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
+  const float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
 
   std::vector<size_t> lod_offsets = {0};
-  std::vector<MeshletsBuffers> lods = {
-      build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight)};
+  ClusterHierarchy dag{};
 
-  std::vector<Cluster> clusters(lods[0].meshlets.size());
-  std::vector<DagNode> dagNodes(lods[0].meshlets.size());
-  for (size_t i = 0; i < clusters.size(); ++i) {
-    clusters[i] = Cluster{
+
+  MeshletsBuffers lods = build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
+  std::vector<DagNode> dagNodes(lods.meshlets.size());
+  std::vector<NodeErrorBounds> node_error_bounds(lods.meshlets.size());
+  std::vector<Node> nodes(lods.meshlets.size());
+
+  std::vector<ClusterIndex> cluster_pool(lods.meshlets.size());
+
+  loop_runner.loop(0, cluster_pool.size(), [&](size_t i) {
+    const auto& meshlet = lods.meshlets[i];
+    meshopt_optimizeMeshlet(
+        &lods.vertices[meshlet.vertex_offset],
+        &lods.triangles[meshlet.triangle_offset],
+        meshlet.triangle_count,
+        meshlet.vertex_count);
+    lods.bounds[i] = meshopt_computeMeshletBounds(
+        &lods.vertices[meshlet.vertex_offset],
+        &lods.triangles[meshlet.triangle_offset],
+        meshlet.triangle_count,
+        vertices.data(),
+        vertex_count,
+        vertex_stride);
+
+    node_error_bounds[i].cluster_error.center[0] = lods.bounds[i].center[0];
+    node_error_bounds[i].cluster_error.center[1] = lods.bounds[i].center[1];
+    node_error_bounds[i].cluster_error.center[2] = lods.bounds[i].center[2];
+    node_error_bounds[i].cluster_error.radius = lods.bounds[i].radius;
+    node_error_bounds[i].cluster_error.error = 0.0;
+
+    cluster_pool[i] = ClusterIndex{
         .index = i,
         .lod = 0,
-        .dag_index = i,
     };
-    init_dag_node(clusters[i], lods[0], dagNodes[i], vertices, vertex_count, vertex_stride, i, 0, 0.0);
-  }
+  });
 
   for (size_t level = 1; level < max_lod_count; ++level) {
     const auto lod_start_time = std::chrono::high_resolution_clock::now();
-    if (clusters.size() <= 1) {
+    if (cluster_pool.size() <= 1) {
       break;
     }
-    lod_offsets.emplace_back(lods[0].meshlets.size());
+    lod_offsets.emplace_back(lods.meshlets.size());
 
-    bool is_last = clusters.size() <= max_num_clusters_per_group;
+    bool is_last = cluster_pool.size() <= max_num_clusters_per_group;
 
-    const auto groups = is_last ? build_final_cluster_group(clusters.size())
-                                : group_clusters(clusters, lods, max_num_clusters_per_group, loop_runner);
+    const auto groups = is_last ? build_final_cluster_group(cluster_pool.size())
+                                : group_clusters(cluster_pool, lods, max_num_clusters_per_group, loop_runner);
 
     // todo: how should we set the target error? should this depend on lod?
     //const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
@@ -212,90 +223,114 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
     std::atomic_size_t num_not_simplified = 0;
 
     std::vector<MeshletsBuffers> lod_meshlets(groups.size());
-    std::vector<std::vector<Cluster>> lod_clusters(groups.size());
+    std::vector<std::vector<ClusterIndex>> lod_clusters(groups.size());
     std::vector<DagNode> lod_dag_nodes(groups.size() * 4);
     loop_runner.loop(0, groups.size(), [&](const size_t i) {
       const auto& group = groups[i];
-      const auto group_indices = merge_group(clusters, lods, group, max_triangles);
+      if (group.empty()) {
+        return;
+      }
 
-      const size_t target_index_count = group.size() <= 2 ? simplify_target_index_count / 2 : simplify_target_index_count;
-      const auto [simplified_indices, error] = simplify_group(
-          group_indices,
-          vertices,
-          vertex_count,
-          vertex_stride,
-          target_index_count,
-          simplify_target_error);
-
-      bool simplified = simplified_indices.size() < group_indices.size();
+      bool simplified = group.size() != 1;
       if (simplified) {
-        auto group_meshlets = std::move(build_meshlets(
-            simplified_indices,
-            vertices,
-            vertex_count,
-            vertex_stride,
-            max_vertices,
-            max_triangles,
-            cone_weight,
-            group.size() - 1));
+        const auto group_indices = merge_group(cluster_pool, lods, group, max_triangles);
 
-        simplified = group_meshlets.meshlets.size() < group.size();
+        const size_t target_index_count =
+            group.size() <= 2 ? simplify_target_index_count / 2 : simplify_target_index_count;
+        const auto [simplified_indices, error] = simplify_group(
+            group_indices, vertices, vertex_count, vertex_stride, target_index_count, simplify_target_error);
 
+        simplified = simplified_indices.size() < group_indices.size();
         if (simplified) {
-          size_t node_offset = num_new_meshlets.fetch_add(group_meshlets.meshlets.size());
-          num_new_vertices += group_meshlets.vertices.size();
-          num_new_triangles += group_meshlets.triangles.size();
-          num_next_clusters += group_meshlets.meshlets.size();
+          auto group_meshlets = std::move(build_parent_meshlets(
+              simplified_indices,
+              vertices,
+              vertex_count,
+              vertex_stride,
+              max_vertices,
+              max_triangles,
+              cone_weight,
+              group.size() - 1));
 
-          // the parent error can't be smaller than any error of its children for consistent lod selection
-          float dag_node_error = std::accumulate(
-              group.cbegin(),
-              group.cend(),
-              error,
-              [&clusters, &dagNodes](const float max_error, const size_t cluster_index) {
-                return std::max(max_error, dagNodes[clusters[cluster_index].dag_index].bounds.error);
+          simplified = group_meshlets.meshlets.size() < group.size();
+
+          if (simplified) {
+            size_t node_offset = num_new_meshlets.fetch_add(group_meshlets.meshlets.size());
+            num_new_vertices += group_meshlets.vertices.size();
+            num_new_triangles += group_meshlets.triangles.size();
+            num_next_clusters += group_meshlets.meshlets.size();
+
+            // todo: error
+            //  - all cluster_pool in group must have same sphere bounds & error
+            //  - parent group sphere bounds must encompass all child vertices (=! group sphere bounds because 3d)
+
+            ErrorBounds group_error_bounds = node_error_bounds[cluster_pool[group[0]].index].cluster_error;
+            group_error_bounds.error = std::max(group_error_bounds.error, error);
+            for (size_t j = 1; j < group.size(); ++j) {
+              const auto& child_error = node_error_bounds[cluster_pool[group[j]].index].cluster_error;
+              group_error_bounds.error = std::max(group_error_bounds.error, child_error.error);
+
+              float dir[3] = {
+                  child_error.center[0] - group_error_bounds.center[0],
+                  child_error.center[1] - group_error_bounds.center[1],
+                  child_error.center[2] - group_error_bounds.center[2],
+              };
+              float dist = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+              if ((dist + child_error.radius) > group_error_bounds.radius) {
+                // todo: grow sphere
+              }
+            }
+
+            // parent group error must be at least as large as the largest child error
+            float dag_node_error = std::accumulate(
+                group.cbegin(),
+                group.cend(),
+                error,
+                [&cluster_pool, &node_error_bounds](const float max_error, const size_t cluster_index) {
+                  return std::max(max_error, node_error_bounds[cluster_pool[cluster_index].index].cluster_error.error);
+                });
+
+            /*
+            std::vector<size_t> child_dag_indices(group.size());
+            for (size_t child_index = 0; child_index < group.size(); ++child_index) {
+              child_dag_indices[child_index] = cluster_pool[group[child_index]].dag_index;
+            }
+             */
+
+            for (size_t cluster_index = 0; cluster_index < group_meshlets.meshlets.size(); ++cluster_index) {
+              const size_t dag_node_index = node_offset + cluster_index;
+              const auto& cluster = lod_clusters[i].emplace_back(ClusterIndex{
+                  .index = cluster_index,
+                  .lod = level,
               });
+              auto& node = lod_dag_nodes[dag_node_index];
+              init_dag_node(
+                  cluster, group_meshlets, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
+              //node.children.insert(node.children.end(), child_dag_indices.cbegin(), child_dag_indices.cend());
+            }
 
-          std::vector<size_t> child_dag_indices(group.size());
-          for (size_t child_index = 0; child_index < group.size(); ++child_index) {
-            child_dag_indices[child_index] = clusters[group[child_index]].dag_index;
+            lod_meshlets[i] = std::move(group_meshlets);
           }
-
-          for (size_t cluster_index = 0; cluster_index < group_meshlets.meshlets.size(); ++cluster_index) {
-            const size_t dag_node_index = node_offset + cluster_index;
-            const auto& cluster = lod_clusters[i].emplace_back(Cluster{
-                .index = cluster_index,
-                .lod = level,
-                .dag_index = dag_node_index,
-            });
-            auto& node = lod_dag_nodes[dag_node_index];
-            init_dag_node(cluster, group_meshlets, node, vertices, vertex_count, vertex_stride, i, level, dag_node_error);
-            node.children.insert(node.children.end(), child_dag_indices.cbegin(), child_dag_indices.cend());
-          }
-
-          lod_meshlets[i] = std::move(group_meshlets);
         }
       }
       if (!simplified) {
-        num_not_simplified += groups[i].size();
-        std::transform(
-            group.cbegin(), group.cend(), std::back_inserter(lod_clusters[i]), [&clusters](const size_t cluster_index) {
-              return clusters[cluster_index];
-            });
+        num_not_simplified += group.size();
         num_next_clusters += group.size();
+        std::transform(
+            group.cbegin(), group.cend(), std::back_inserter(lod_clusters[i]), [&cluster_pool](const size_t cluster_index) {
+              return cluster_pool[cluster_index];
+            });
       }
     });
 
-    std::vector<Cluster> next_clusters{};
-    // merge meshlets & prepare next iteration's clusters
+    std::vector<ClusterIndex> next_clusters{};
+    // merge meshlets & prepare next iteration's cluster_pool
     {
       next_clusters.reserve(num_next_clusters);
 
-      auto& next_meshlets = lods.emplace_back();
-
-      next_meshlets.meshlets.reserve(num_new_meshlets);
-      next_meshlets.vertices.reserve(num_new_vertices);
-      next_meshlets.triangles.reserve(num_new_triangles);
+      lods.meshlets.reserve(lods.meshlets.size() + num_new_meshlets);
+      lods.vertices.reserve(lods.vertices.size() + num_new_vertices);
+      lods.triangles.reserve(lods.triangles.size() + num_new_triangles);
 
       for (size_t i = 0; i < groups.size(); ++i) {
         if (!lod_meshlets[i].meshlets.empty()) {
@@ -304,23 +339,21 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
             if (cluster.lod != level) {
               continue;
             }
-            cluster.index += next_meshlets.meshlets.size();
-            lod_dag_nodes[cluster.dag_index].clusterIndex = cluster.index;
-            cluster.dag_index += dagNodes.size();
+            cluster.index += lods.meshlets.size();
 
-            lod_meshlets[i].meshlets[cluster_index].vertex_offset += next_meshlets.vertices.size();
-            lod_meshlets[i].meshlets[cluster_index].triangle_offset += next_meshlets.triangles.size();
+            lod_meshlets[i].meshlets[cluster_index].vertex_offset += lods.vertices.size();
+            lod_meshlets[i].meshlets[cluster_index].triangle_offset += lods.triangles.size();
           }
-          next_meshlets.meshlets.insert(
-              next_meshlets.meshlets.cend(),
+          lods.meshlets.insert(
+              lods.meshlets.cend(),
               std::make_move_iterator(lod_meshlets[i].meshlets.cbegin()),
               std::make_move_iterator(lod_meshlets[i].meshlets.cend()));
-          next_meshlets.vertices.insert(
-              next_meshlets.vertices.cend(),
+          lods.vertices.insert(
+              lods.vertices.cend(),
               std::make_move_iterator(lod_meshlets[i].vertices.cbegin()),
               std::make_move_iterator(lod_meshlets[i].vertices.cend()));
-          next_meshlets.triangles.insert(
-              next_meshlets.triangles.cend(),
+          lods.triangles.insert(
+              lods.triangles.cend(),
               std::make_move_iterator(lod_meshlets[i].triangles.cbegin()),
               std::make_move_iterator(lod_meshlets[i].triangles.cend()));
         }
@@ -341,8 +374,8 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
           int(level),
           int(num_new_meshlets),
           int(level - 1),
-          int(clusters.size()),
-          int(clusters.size()) / 2,
+          int(cluster_pool.size()),
+          int(cluster_pool.size()) / 2,
           int(num_not_simplified));
     }
 
@@ -359,15 +392,17 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
     // todo:
     // insert into dag
 
-    clusters = std::move(next_clusters);
+    cluster_pool = std::move(next_clusters);
   }
 
+  /*
   if (!lods.empty() && lods.back().meshlets.empty()) {
     lods.resize(lods.size() - 1);
   }
   size_t num_root_nodes = lods.back().meshlets.size();
 
   const auto root = dagNodes.back();
+   */
 
   // parallelize, optimize runtime + memory usage, tune
 
