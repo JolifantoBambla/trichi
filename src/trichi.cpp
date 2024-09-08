@@ -131,22 +131,12 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuff
     const std::vector<float>& vertices,
     size_t vertex_count,
     size_t vertex_stride,
-    size_t max_triangles,
-    float simplify_target_index_count_threshold,
-    float min_target_error,
-    float max_target_error,
-    float simplify_scale,
-    float lod_scale) {
+    size_t target_index_count,
+    float target_error) {
   // todo: maybe optional with attributes?
   std::vector<uint32_t> simplified_indices(group_indices.size());
-  size_t target_index_count =
-      // we want to reduce ~50% of tris
-      (static_cast<size_t>(static_cast<float>(max_triangles * simplify_target_index_count_threshold)) * 3) * 2;
-  float step_target_error = std::lerp(min_target_error, max_target_error, lod_scale) *
-                            simplify_scale;  // range [0..1] todo: what should that be? probably should depend on lod?
   uint32_t simplification_options = meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
   float simplification_error = 0.0f;
-
   simplified_indices.resize(meshopt_simplify(
       simplified_indices.data(),
       group_indices.data(),
@@ -155,64 +145,12 @@ merge_group(const std::vector<Cluster>& clusters, const std::vector<MeshletsBuff
       vertex_count,
       vertex_stride,
       target_index_count,
-      step_target_error,
+      target_error,
       simplification_options,
       &simplification_error));
 
   return std::make_pair(std::move(simplified_indices), simplification_error);
 }
-
-/*
-[[nodiscard]] std::vector<Cluster> process_cluster_pool(const std::vector<Cluster>& clusters) {
-  std::vector<Cluster> next{};
-  next.reserve(clusters.size() / 2);
-
-  const auto groups = group_clusters(meshlets, max_num_clusters_per_group);
-
-  size_t num_new_meshlets = 0;
-  size_t num_not_simplified = 0;
-  const auto start_process_groups = std::chrono::high_resolution_clock::now();
-  for (const auto& group : groups) {
-    const auto group_indices = merge_group(meshlets, group, max_triangles);
-
-    const auto simplified_indices = simplify_group(
-        group_indices,
-        vertices,
-        vertex_count,
-        vertex_stride,
-        max_vertices,
-        simplify_target_index_count_threshold,
-        min_target_error,
-        max_target_error,
-        simplify_scale,
-        lod_scale);
-
-    // todo: optimize group? since we don't use scan should be fine without?
-
-    const auto group_meshlets = build_meshlets(
-        simplified_indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
-
-    num_new_meshlets += group_meshlets.meshlets.size();
-
-    if (group_meshlets.meshlets.size() >= max_num_clusters_per_group) {
-      ++num_not_simplified;
-    }
-  }
-  const auto end_process_groups = std::chrono::high_resolution_clock::now();
-  printf(
-      "process groups: took %ld ms\n",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end_process_groups - start_process_groups).count());
-
-  printf(
-      "num meshlets: lod 1: %i vs lod 0: %i; target: %i; not simplified: %i\n",
-      int(num_new_meshlets),
-      int(meshlets.meshlets.size()),
-      int(meshlets.meshlets.size()) / 2,
-      int(num_not_simplified));
-
-  return next;
-}
-*/
 
 void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TrichiParams& params) {
   const auto start_time = std::chrono::high_resolution_clock::now();
@@ -222,12 +160,12 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
   }
   const size_t vertex_count = (vertices.size() * sizeof(float)) / vertex_stride;
 
-  // todo: should be params
   const size_t max_vertices = params.max_vertices;
   const size_t max_triangles = params.max_triangles;
   const float cone_weight = params.cone_weight;
   const size_t max_num_clusters_per_group = params.max_num_clusters_per_group;
-  const float simplify_target_index_count_threshold = params.cone_weight;
+  const size_t simplify_target_index_count = std::min(max_vertices, max_triangles) * 3 * 2;
+  const float simplify_target_index_count_threshold = params.simplify_target_index_count_threshold;
   const size_t max_lod_count = params.max_lod_count;
   const float min_target_error = params.min_target_error;
   const float max_target_error = params.max_target_error;
@@ -260,9 +198,12 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
 
     bool is_last = clusters.size() <= max_num_clusters_per_group;
 
-    const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
     const auto groups = is_last ? build_final_cluster_group(clusters.size())
                                 : group_clusters(clusters, lods, max_num_clusters_per_group, loop_runner);
+
+    // todo: how should we set the target error? should this depend on lod?
+    //const float lod_scale = is_last ? 1.0f : static_cast<float>(level) / static_cast<float>(max_lod_count);
+    const float simplify_target_error = std::numeric_limits<float>::max(); // std::lerp(min_target_error, max_target_error, lod_scale) * simplify_scale;
 
     std::atomic_size_t num_new_meshlets = 0;
     std::atomic_size_t num_new_vertices = 0;
@@ -277,17 +218,14 @@ void build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::ve
       const auto& group = groups[i];
       const auto group_indices = merge_group(clusters, lods, group, max_triangles);
 
+      const size_t target_index_count = group.size() <= 2 ? simplify_target_index_count / 2 : simplify_target_index_count;
       const auto [simplified_indices, error] = simplify_group(
           group_indices,
           vertices,
           vertex_count,
           vertex_stride,
-          max_triangles,
-          simplify_target_index_count_threshold,
-          min_target_error,
-          max_target_error,
-          simplify_scale,
-          lod_scale);
+          target_index_count,
+          simplify_target_error);
 
       bool simplified = simplified_indices.size() < group_indices.size();
       if (simplified) {
