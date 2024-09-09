@@ -1,6 +1,7 @@
-//
-// Created by lukas on 21.08.24.
-//
+/**
+* Copyright (c) 2024 Lukas Herzberger
+* SPDX-License-Identifier: MIT
+*/
 
 #include <array>
 #include <atomic>
@@ -9,8 +10,6 @@
 #include <fstream>
 #include <iostream>  // todo: remove
 #include <numeric>
-#include <optional>
-#include <thread>
 
 #include "meshoptimizer.h"
 #include "metis.h"
@@ -19,7 +18,6 @@
 #include "trichi.hpp"
 
 namespace trichi {
-
 [[nodiscard]] MeshletsBuffers build_meshlets(
     const std::vector<uint32_t>& indices,
     const std::vector<float>& vertices,
@@ -148,6 +146,7 @@ merge_group(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lo
 }
 
 ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TriChiParams& params) {
+  // todo: remove
   const auto start_time = std::chrono::high_resolution_clock::now();
 
   if ((vertices.size() * sizeof(float)) % vertex_stride != 0) {
@@ -162,9 +161,7 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
   const size_t simplify_target_index_count = std::min(max_vertices, max_triangles) * 3 * 2;
   const size_t max_lod_count = params.max_hierarchy_depth;
 
-  LoopRunner loop_runner{std::thread::hardware_concurrency()};
-
-  //const float simplify_scale = meshopt_simplifyScale(vertices.data(), vertex_count, vertex_stride);
+  LoopRunner loop_runner{std::max(params.thread_pool_size, static_cast<size_t>(1))};
 
   std::vector<size_t> lod_offsets = {0};
 
@@ -214,7 +211,9 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
   });
 
   for (size_t level = 1; level < max_lod_count; ++level) {
+    // todo: remove
     const auto lod_start_time = std::chrono::high_resolution_clock::now();
+
     if (cluster_pool.size() <= 1) {
       break;
     }
@@ -237,6 +236,8 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
     std::vector<std::vector<ClusterIndex>> lod_clusters(groups.size());
     std::vector<std::vector<NodeErrorBounds>> lod_error_bounds(groups.size());
     std::vector<std::vector<Node>> lod_nodes(groups.size());
+
+    // todo: cleanup
     loop_runner.loop(0, groups.size(), [&](const size_t i) {
       const auto& group = groups[i];
       if (group.empty()) {
@@ -416,6 +417,7 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
             std::make_move_iterator(lod_clusters[i].cend()));
       }
 
+      // todo: remove
       printf(
           "num clusters: lod %i: %i vs lod %i: %i; target: %i; not simplified: %i\n",
           int(level),
@@ -426,6 +428,7 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
           int(num_not_simplified));
     }
 
+    // todo: remove
     const auto lod_end_time = std::chrono::high_resolution_clock::now();
     printf(
         "lod %i: took %ld ms\n",
@@ -445,151 +448,11 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
     root_nodes.emplace_back(i);
   }
 
-  // todo: how to pack as gltf (?) (not part of the lib but for my personal use)
-  //  - meshlet data in buffers (bounds, normal cone, error), dag?
-  //  - each lod as a mesh? store lod hierarchy info in extras
-  //  - each meshlet as a primitive? store hierarchy info (child indices, etc.) and culling (cluster bounds, normal cone, error) in extras
-
+  // todo: remove
   const auto end_time = std::chrono::high_resolution_clock::now();
   printf(
       "create dag: took %ld ms\n",
       std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count());
-
-  // todo: for now to quickly have a demo
-  //  - output all meshlet data as js file (concatenate clusters, vertices, triangles)
-  //  - output vertices in js file
-  //  - output dag data in js file
-
-  /*
-  std::vector<size_t> offsets{};
-  lod_offsets.reserve(lods.size());
-  MeshletsBuffers concatenated{};
-  for (size_t i = 0; i < lods.size(); ++i) {
-    printf(
-        "%i clusters %i vertices %i triangles\n",
-        int(lods[i].clusters.size()),
-        int(lods[i].vertices.size()),
-        int(lods[i].triangles.size()));
-    offsets.push_back(concatenated.clusters.size());
-    if (i == 0) {
-      concatenated.clusters.insert(concatenated.clusters.cend(), lods[i].clusters.cbegin(), lods[i].clusters.cend());
-    } else {
-      std::transform(
-          lods[i].clusters.cbegin(), lods[i].clusters.cend(), std::back_inserter(concatenated.clusters), [&](auto m) {
-            m.vertex_offset += concatenated.vertices.size();
-            m.triangle_offset += concatenated.triangles.size();
-            return m;
-          });
-    }
-    concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cend());
-    concatenated.triangles.insert(concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cend());
-    printf(
-        "concatenated: %i clusters %i vertices %i triangles\n",
-        int(concatenated.clusters.size()),
-        int(concatenated.vertices.size()),
-        int(concatenated.triangles.size()));
-  }
-
-  float aabb_min[3] = {
-      std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-  float aabb_max[3] = {
-      std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min()};
-
-  std::ofstream js_stream("/home/lherzberger/Projects/per-meshlet-nuances/demo/demo-mesh.js");
-  js_stream << "export const mesh = {\n";
-  js_stream << "  vertices: new Float32Array([";
-  for (size_t i = 0; i < vertices.size(); ++i) {
-    js_stream << vertices[i];
-    if (i != vertices.size() - 1) {
-      js_stream << ",";
-    }
-    if (i % 3 == 0) {
-      for (size_t c = 0; c < 3; ++c) {
-        aabb_min[c] = std::min(aabb_min[c], vertices[i + c]);
-        aabb_max[c] = std::max(aabb_max[c], vertices[i + c]);
-      }
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "  strideFloats: " << vertex_stride / sizeof(float) << ",\n";
-
-  js_stream << "  clusters: new Uint32Array([";
-  for (size_t i = 0; i < concatenated.clusters.size(); ++i) {
-    if (i < lods[0].clusters.size()) {
-      assert(concatenated.clusters[i].vertex_offset == lods[0].clusters[i].vertex_offset);
-      assert(concatenated.clusters[i].triangle_offset == lods[0].clusters[i].triangle_offset);
-      assert(concatenated.clusters[i].vertex_count == lods[0].clusters[i].vertex_count);
-      assert(concatenated.clusters[i].triangle_count == lods[0].clusters[i].triangle_count);
-    }
-    js_stream << concatenated.clusters[i].vertex_offset << ",";
-    js_stream << concatenated.clusters[i].triangle_offset << ",";
-    js_stream << concatenated.clusters[i].vertex_count << ",";
-    js_stream << concatenated.clusters[i].triangle_count;
-    if (i != concatenated.clusters.size() - 1) {
-      js_stream << ",";
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "  meshletVertices: new Uint32Array([";
-  for (size_t i = 0; i < concatenated.vertices.size(); ++i) {
-    if (i < lods[0].vertices.size()) {
-      assert(concatenated.vertices[i] == lods[0].vertices[i]);
-    }
-    js_stream << concatenated.vertices[i];
-    if (i != concatenated.vertices.size() - 1) {
-      js_stream << ",";
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "  meshletTriangles: new Uint32Array([";
-  for (size_t i = 0; i < concatenated.triangles.size(); ++i) {
-    if (i < lods[0].triangles.size()) {
-      assert(concatenated.triangles[i] == lods[0].triangles[i]);
-    }
-    js_stream << static_cast<uint32_t>(concatenated.triangles[i]);
-    if (i != concatenated.triangles.size() - 1) {
-      js_stream << ",";
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "  lods: new Uint32Array([";
-  for (size_t i = 0; i < offsets.size(); ++i) {
-    js_stream << offsets[i];
-    if (i != offsets.size() - 1) {
-      js_stream << ",";
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "  numMeshlets: " << concatenated.clusters.size() << ",\n";
-
-  js_stream << "  maxClusterTriangles: " << max_triangles_per_cluster << ",\n";
-
-  js_stream << "  aabb: {min: new Float32Array([" << aabb_min[0] << "," << aabb_min[1] << "," << aabb_min[2]
-            << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
-
-  // todo: dag data
-  js_stream << "  bounds: new Float32Array([";
-  for (size_t i = 0; i < dagNodes.size(); ++i) {
-    const auto& node = dagNodes[i];
-    js_stream << node.bounds.center[0] << "," << node.bounds.center[1] << "," << node.bounds.center[2] << ",";
-    js_stream << node.bounds.radius << ",";
-    js_stream << node.bounds.axis[0] << "," << node.bounds.axis[1] << "," << node.bounds.axis[2] << ",";
-    js_stream << node.bounds.error << ",";
-    js_stream << node.bounds.apex[0] << "," << node.bounds.apex[1] << "," << node.bounds.apex[2] << ",";
-    js_stream << node.bounds.cutoff;
-    if (i < dagNodes.size() - 1) {
-      js_stream << ",";
-    }
-  }
-  js_stream << "]),\n";
-
-  js_stream << "}" << std::endl;
-  */
 
   return ClusterHierarchy{
       .nodes = std::move(nodes),

@@ -1,6 +1,7 @@
-//
-// Created by lukas on 28.08.24.
-//
+/**
+* Copyright (c) 2024 Lukas Herzberger
+* SPDX-License-Identifier: MIT
+*/
 
 #include "meshoptimizer.h"
 
