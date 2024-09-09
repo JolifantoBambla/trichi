@@ -30,7 +30,7 @@ struct Vertex {
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
-@group(1) @binding(1) var<storage> meshlets: array<Meshlet>;
+@group(1) @binding(1) var<storage> clusters: array<Meshlet>;
 @group(1) @binding(2) var<storage> vertices: array<u32>;
 @group(1) @binding(3) var<storage> triangles: array<u32>;
 @group(1) @binding(4) var<storage> vertex_data: array<f32>;
@@ -62,7 +62,7 @@ struct VertexOut {
 fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_index) vertex_index: u32) -> VertexOut {
     let cluster_instance = cluster_instances[cluster_instance_index];
 
-    let meshlet = meshlets[cluster_instance.cluster_index];
+    let meshlet = clusters[cluster_instance.cluster_index];
     if vertex_index >= (meshlet.triangle_count * 3) {
         return VertexOut(
             vec4<f32>(1.0, 1.0, 1.0, 0.0), // position will be clipped

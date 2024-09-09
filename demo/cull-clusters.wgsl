@@ -27,10 +27,10 @@ struct DrawIndirectArgs {
 struct ClusterBounds {
     center: vec3<f32>,
     radius: f32,
-    cone_axis: vec3<f32>,
+    axis: vec3<f32>,
     error: f32,
-    cone_apex: vec3<f32>,
-    cone_cutoff: f32,
+    apex: vec3<f32>,
+    cutoff: f32,
 }
 
 // per frame uniforms
@@ -74,7 +74,7 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
     }
 
     // backface culling (if cutoff is >= 1 then the normal cone is too wide for backface culling)
-    if bounds.cone_cutoff < 1.0 && dot(normalize(bounds.cone_apex - camera.position), bounds.cone_axis) >= bounds.cone_cutoff {
+    if bounds.cutoff < 1.0 && dot(normalize(bounds.apex - camera.position), bounds.axis) >= bounds.cutoff {
         return;
     }
 
