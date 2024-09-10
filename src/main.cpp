@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: MIT
 */
 
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -61,35 +62,6 @@ int main(int argc, char* argv[]) {
     params.thread_pool_size = std::thread::hardware_concurrency();
     const auto dag = trichi::build_cluster_hierarchy(indices, vertices, vertex_stride, params);
 
-    /*
-  std::vector<size_t> offsets{};
-  lod_offsets.reserve(lods.size());
-  MeshletsBuffers concatenated{};
-  for (size_t i = 0; i < lods.size(); ++i) {
-    printf(
-        "%i clusters %i vertices %i triangles\n",
-        int(lods[i].clusters.size()),
-        int(lods[i].vertices.size()),
-        int(lods[i].triangles.size()));
-    offsets.push_back(concatenated.clusters.size());
-    if (i == 0) {
-      concatenated.clusters.insert(concatenated.clusters.cend(), lods[i].clusters.cbegin(), lods[i].clusters.cend());
-    } else {
-      std::transform(
-          lods[i].clusters.cbegin(), lods[i].clusters.cend(), std::back_inserter(concatenated.clusters), [&](auto m) {
-            m.vertex_offset += concatenated.vertices.size();
-            m.triangle_offset += concatenated.triangles.size();
-            return m;
-          });
-    }
-    concatenated.vertices.insert(concatenated.vertices.cend(), lods[i].vertices.cbegin(), lods[i].vertices.cend());
-    concatenated.triangles.insert(concatenated.triangles.cend(), lods[i].triangles.cbegin(), lods[i].triangles.cend());
-    printf(
-        "concatenated: %i clusters %i vertices %i triangles\n",
-        int(concatenated.clusters.size()),
-        int(concatenated.vertices.size()),
-        int(concatenated.triangles.size()));
-  }
 
     float aabb_min[3] = {
         std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
@@ -116,81 +88,67 @@ int main(int argc, char* argv[]) {
     js_stream << "  strideFloats: " << vertex_stride / sizeof(float) << ",\n";
 
     js_stream << "  clusters: new Uint32Array([";
-    for (size_t i = 0; i < concatenated.clusters.size(); ++i) {
-      if (i < lods[0].clusters.size()) {
-        assert(concatenated.clusters[i].vertex_offset == lods[0].clusters[i].vertex_offset);
-        assert(concatenated.clusters[i].triangle_offset == lods[0].clusters[i].triangle_offset);
-        assert(concatenated.clusters[i].vertex_count == lods[0].clusters[i].vertex_count);
-        assert(concatenated.clusters[i].triangle_count == lods[0].clusters[i].triangle_count);
-      }
-      js_stream << concatenated.clusters[i].vertex_offset << ",";
-      js_stream << concatenated.clusters[i].triangle_offset << ",";
-      js_stream << concatenated.clusters[i].vertex_count << ",";
-      js_stream << concatenated.clusters[i].triangle_count;
-      if (i != concatenated.clusters.size() - 1) {
+    for (size_t i = 0; i < dag.clusters.size(); ++i) {
+      js_stream << dag.clusters[i].vertex_offset << ",";
+      js_stream << dag.clusters[i].triangle_offset << ",";
+      js_stream << dag.clusters[i].vertex_count << ",";
+      js_stream << dag.clusters[i].triangle_count;
+      if (i != dag.clusters.size() - 1) {
         js_stream << ",";
       }
     }
     js_stream << "]),\n";
 
     js_stream << "  meshletVertices: new Uint32Array([";
-    for (size_t i = 0; i < concatenated.vertices.size(); ++i) {
-      if (i < lods[0].vertices.size()) {
-        assert(concatenated.vertices[i] == lods[0].vertices[i]);
-      }
-      js_stream << concatenated.vertices[i];
-      if (i != concatenated.vertices.size() - 1) {
+    for (size_t i = 0; i < dag.vertices.size(); ++i) {
+      js_stream << dag.vertices[i];
+      if (i != dag.vertices.size() - 1) {
         js_stream << ",";
       }
     }
     js_stream << "]),\n";
 
     js_stream << "  meshletTriangles: new Uint32Array([";
-    for (size_t i = 0; i < concatenated.triangles.size(); ++i) {
-      if (i < lods[0].triangles.size()) {
-        assert(concatenated.triangles[i] == lods[0].triangles[i]);
-      }
-      js_stream << static_cast<uint32_t>(concatenated.triangles[i]);
-      if (i != concatenated.triangles.size() - 1) {
+    for (size_t i = 0; i < dag.triangles.size(); ++i) {
+      js_stream << static_cast<uint32_t>(dag.triangles[i]);
+      if (i != dag.triangles.size() - 1) {
         js_stream << ",";
       }
     }
     js_stream << "]),\n";
 
     js_stream << "  lods: new Uint32Array([";
-    for (size_t i = 0; i < offsets.size(); ++i) {
-      js_stream << offsets[i];
-      if (i != offsets.size() - 1) {
+    for (size_t i = 0; i < dag.lod_offsets.size(); ++i) {
+      js_stream << dag.lod_offsets[i];
+      if (i != dag.lod_offsets.size() - 1) {
         js_stream << ",";
       }
     }
     js_stream << "]),\n";
 
-    js_stream << "  numMeshlets: " << concatenated.clusters.size() << ",\n";
+    js_stream << "  numMeshlets: " << dag.clusters.size() << ",\n";
 
-    js_stream << "  maxClusterTriangles: " << max_triangles_per_cluster << ",\n";
+    js_stream << "  maxClusterTriangles: " << params.max_triangles_per_cluster << ",\n";
 
     js_stream << "  aabb: {min: new Float32Array([" << aabb_min[0] << "," << aabb_min[1] << "," << aabb_min[2]
               << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
 
-    // todo: dag data
     js_stream << "  bounds: new Float32Array([";
-    for (size_t i = 0; i < dagNodes.size(); ++i) {
-      const auto& node = dagNodes[i];
-      js_stream << node.bounds.center[0] << "," << node.bounds.center[1] << "," << node.bounds.center[2] << ",";
-      js_stream << node.bounds.radius << ",";
-      js_stream << node.bounds.axis[0] << "," << node.bounds.axis[1] << "," << node.bounds.axis[2] << ",";
-      js_stream << node.bounds.error << ",";
-      js_stream << node.bounds.apex[0] << "," << node.bounds.apex[1] << "," << node.bounds.apex[2] << ",";
-      js_stream << node.bounds.cutoff;
-      if (i < dagNodes.size() - 1) {
+    for (size_t i = 0; i < dag.error_bounds.size(); ++i) {
+      const auto& node = dag.error_bounds[i];
+      js_stream << node.parent_error.center[0] << "," << node.parent_error.center[1] << "," << node.parent_error.center[2] << ",";
+      js_stream << node.parent_error.radius << ",";
+      js_stream << node.parent_error.error << ",";
+      js_stream << node.cluster_error.center[0] << "," << node.cluster_error.center[1] << "," << node.cluster_error.center[2] << ",";
+      js_stream << node.cluster_error.radius << ",";
+      js_stream << node.cluster_error.error << ",";
+      if (i < dag.error_bounds.size() - 1) {
         js_stream << ",";
       }
     }
     js_stream << "]),\n";
 
     js_stream << "}" << std::endl;
-    */
   }
 
   return 0;

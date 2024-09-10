@@ -64,11 +64,6 @@ struct ErrorBounds {
   float center[3]{};
 
   /**
-   * The bounding sphere's radius.
-   */
-  float radius{};
-
-  /**
    * The cluster's absolute simplification error.
    */
   float error = 0.0;
@@ -99,7 +94,7 @@ struct NormalCone {
  * A cluster's / DAG node's error bounds.
  *
  * A cluster should be selected for a view, if its projected error is below a threshold but its parent group's error is above the same threshold.
- * A cluster is invisible if it's own bounds are not in the view frustum or does not contain any front- / back-facing triangles with respect to its normal cone.
+ * A cluster is invisible if its own bounds are not in the view frustum or does not contain any front- / back-facing triangles with respect to its normal cone.
  */
 struct NodeErrorBounds {
   /**
@@ -111,6 +106,18 @@ struct NodeErrorBounds {
    * The cluster's error bounds.
    */
   ErrorBounds cluster_error{};
+};
+
+struct ClusterBounds {
+  /**
+   * The bounding sphere's center.
+   */
+  float center[3]{};
+
+  /**
+   * The bounding sphere's radius.
+   */
+  float radius{};
 
   /**
    * The cluster's normal cone.
@@ -188,8 +195,15 @@ struct ClusterHierarchy {
 
   /**
    * Error bounds of clusters.
+   * Used for LOD selection.
    */
-  std::vector<NodeErrorBounds> node_errors{};
+  std::vector<NodeErrorBounds> error_bounds{};
+
+  /**
+   * Bounds of clusters.
+   * Used for cluster culling.
+   */
+  std::vector<ClusterBounds> bounds{};
 
   /**
    * Clusters in the hierarchy.
@@ -211,6 +225,9 @@ struct ClusterHierarchy {
    *    vertices[c.triangle_offset], vertices[c.triangle_offset + c.triangle_count * 3]
    */
   std::vector<uint8_t> triangles{};
+
+  // todo: remove
+  std::vector<std::size_t> lod_offsets{};
 };
 
 /**
