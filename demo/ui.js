@@ -6,6 +6,7 @@ export function makeUi(numLods) {
             lod: 0,
             updateCullingCamera: true,
             drawDirect: false,
+            errorThreshold: 0.0001,
         },
     };
 
@@ -34,6 +35,7 @@ Escape: exit pointer lock on canvas`,
     renderSettingsFolder.addBinding(params.renderSettings, 'lod', {label: 'LOD', min: 0, max: numLods - 1, step: 1});
     renderSettingsFolder.addBinding(params.renderSettings, 'updateCullingCamera', {label: 'Update culling camera'});
     renderSettingsFolder.addBinding(params.renderSettings, 'drawDirect', {label: 'Draw clusters directly'});
+    renderSettingsFolder.addBinding(params.renderSettings, 'errorThreshold', {label: 'Error threshold', min: 0.0, max: 1.0, step: 0.001});
 
     return params;
 }

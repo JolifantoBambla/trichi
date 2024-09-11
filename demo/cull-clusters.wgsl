@@ -50,7 +50,7 @@ struct ClusterBounds {
 
 // per frame uniforms
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(0) @binding(0) var<uniform> error_config: ErrorConfig;
+@group(0) @binding(1) var<uniform> error_config: ErrorConfig;
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
@@ -71,7 +71,7 @@ fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
   return (radius * error_config.view_height) / 2.0;
 }
 
-fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds, threshold: f32) -> bool {
+fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds) -> bool {
   let cluster_error = project_error_bounds(transform, bounds.cluster_error);
   let parent_error = project_error_bounds(transform, bounds.parent_error);
   return parent_error > error_config.threshold && cluster_error <= error_config.threshold;
@@ -92,7 +92,7 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
 
     let cluster_instance = cluster_instances[thread_id];
     let error = error_bounds[cluster_instance.cluster_index];
-    let bounds = cluster_bounds(cluster_instance.cluster_index);
+    let bounds = cluster_bounds[cluster_instance.cluster_index];
     let transform = instances[cluster_instance.instance_index].model;
 
     if !is_selected_lod(camera.projection * camera.view * transform, error) {

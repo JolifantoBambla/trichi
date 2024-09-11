@@ -165,9 +165,9 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
 
   std::vector<size_t> lod_offsets = {0};
 
-
   MeshletsBuffers lods = build_meshlets(indices, vertices, vertex_count, vertex_stride, max_vertices, max_triangles, cone_weight);
   std::vector<NodeErrorBounds> node_error_bounds(lods.clusters.size());
+  std::vector<ClusterBounds> node_cluster_bounds(lods.clusters.size());
   std::vector<Node> nodes(lods.clusters.size());
 
   std::vector<ClusterIndex> cluster_pool(lods.clusters.size());
@@ -191,19 +191,22 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
     node_error_bounds[i].parent_error.center[0] = cluster_bounds.center[0];
     node_error_bounds[i].parent_error.center[1] = cluster_bounds.center[1];
     node_error_bounds[i].parent_error.center[2] = cluster_bounds.center[2];
-    node_error_bounds[i].parent_error.radius = cluster_bounds.radius;
     node_error_bounds[i].parent_error.error = std::numeric_limits<float>::max();
     node_error_bounds[i].cluster_error.center[0] = cluster_bounds.center[0];
     node_error_bounds[i].cluster_error.center[1] = cluster_bounds.center[1];
     node_error_bounds[i].cluster_error.center[2] = cluster_bounds.center[2];
-    node_error_bounds[i].cluster_error.radius = cluster_bounds.radius;
     node_error_bounds[i].cluster_error.error = 0.0;
-    node_error_bounds[i].normal_cone.apex[0] = cluster_bounds.cone_apex[0];
-    node_error_bounds[i].normal_cone.apex[1] = cluster_bounds.cone_apex[1];
-    node_error_bounds[i].normal_cone.apex[2] = cluster_bounds.cone_apex[2];
-    node_error_bounds[i].normal_cone.axis[0] = cluster_bounds.cone_axis[0];
-    node_error_bounds[i].normal_cone.axis[1] = cluster_bounds.cone_axis[1];
-    node_error_bounds[i].normal_cone.axis[2] = cluster_bounds.cone_axis[2];
+
+    node_cluster_bounds[i].center[0] = cluster_bounds.center[0];
+    node_cluster_bounds[i].center[1] = cluster_bounds.center[1];
+    node_cluster_bounds[i].center[2] = cluster_bounds.center[2];
+    node_cluster_bounds[i].radius = cluster_bounds.radius;
+    node_cluster_bounds[i].normal_cone.apex[0] = cluster_bounds.cone_apex[0];
+    node_cluster_bounds[i].normal_cone.apex[1] = cluster_bounds.cone_apex[1];
+    node_cluster_bounds[i].normal_cone.apex[2] = cluster_bounds.cone_apex[2];
+    node_cluster_bounds[i].normal_cone.axis[0] = cluster_bounds.cone_axis[0];
+    node_cluster_bounds[i].normal_cone.axis[1] = cluster_bounds.cone_axis[1];
+    node_cluster_bounds[i].normal_cone.axis[2] = cluster_bounds.cone_axis[2];
 
     cluster_pool[i] = ClusterIndex{
         .index = i,
@@ -287,6 +290,9 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
                 vertex_stride);
 
             ErrorBounds group_error_bounds{};
+            group_error_bounds.center[0] = group_bounds.center[0];
+            group_error_bounds.center[1] = group_bounds.center[1];
+            group_error_bounds.center[2] = group_bounds.center[2];
             group_error_bounds.error = std::accumulate(
                 group.cbegin(),
                 group.cend(),
@@ -294,33 +300,13 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
                 [&cluster_pool, &node_error_bounds](const float max_error, const size_t cluster_index) {
                   return std::max(max_error, node_error_bounds[cluster_pool[cluster_index].index].cluster_error.error);
                 });
-            group_error_bounds.center[0] = group_bounds.center[0];
-            group_error_bounds.center[1] = group_bounds.center[1];
-            group_error_bounds.center[2] = group_bounds.center[2];
-            group_error_bounds.radius = group_bounds.radius;
 
-            std::vector<size_t> child_node_indices(group.size());
-            for (size_t child_index = 0; child_index < group_meshlets.clusters.size(); ++child_index) {
-              const size_t cluster_index = group[child_index];
-              // I'm not sure if I understood that correctly from the Nanite slides: the parent has to conservatively bound their children
-              // but should its own cluster error then also be the group error? I don't think so because then cluster bounds would be way too large would they not?
-              // I think clusters in the group only need to share the same parent bound but have their own bounds too
-
-              // grow bounding sphere to enclose all its children's bounding spheres - this is not minimal anymore but should be good enough for lod decision?
-              const auto& cluster_error = node_error_bounds[cluster_pool[cluster_index].index].cluster_error;
-              const float c1c2[3] = {
-                  cluster_error.center[0] - group_error_bounds.center[0],
-                  cluster_error.center[1] - group_error_bounds.center[1],
-                  cluster_error.center[2] - group_error_bounds.center[2],
-              };
-              const float dist = std::sqrt(c1c2[0] * c1c2[0] + c1c2[1] * c1c2[1] + c1c2[2] * c1c2[2]);
-              group_error_bounds.radius = std::max(group_error_bounds.radius, dist + cluster_error.radius);
-
-              child_node_indices[child_index] = cluster_pool[cluster_index].index;
-            }
-
-            for (const auto& child_index : group) {
-              node_error_bounds[cluster_pool[child_index].index].parent_error = group_error_bounds;
+            std::vector<size_t> child_node_indices{};
+            child_node_indices.reserve(group.size());
+            for (const size_t group_cluster_index : group) {
+              const size_t cluster_index = cluster_pool[group_cluster_index].index;
+              node_error_bounds[cluster_index].parent_error = group_error_bounds;
+              child_node_indices.emplace_back(cluster_index);
             }
 
             for (size_t parent_index = 0; parent_index < group_meshlets.clusters.size(); ++parent_index) {
@@ -333,30 +319,25 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
                   vertex_count,
                   vertex_stride);
 
-              auto& node_bounds = lod_error_bounds[i].emplace_back();
-              node_bounds.parent_error.center[0] = cluster_bounds.center[0];
-              node_bounds.parent_error.center[1] = cluster_bounds.center[1];
-              node_bounds.parent_error.center[2] = cluster_bounds.center[2];
-              node_bounds.parent_error.radius = cluster_bounds.radius;
-              node_bounds.parent_error.error = std::numeric_limits<float>::max();
-              node_bounds.cluster_error.center[0] = cluster_bounds.center[0];
-              node_bounds.cluster_error.center[1] = cluster_bounds.center[1];
-              node_bounds.cluster_error.center[2] = cluster_bounds.center[2];
-              node_bounds.cluster_error.radius = cluster_bounds.radius;
-              node_bounds.cluster_error.error = error;
+              auto& node_error = lod_error_bounds[i].emplace_back();
+              node_error.parent_error.center[0] = cluster_bounds.center[0];
+              node_error.parent_error.center[1] = cluster_bounds.center[1];
+              node_error.parent_error.center[2] = cluster_bounds.center[2];
+              node_error.parent_error.error = std::numeric_limits<float>::max();
+              node_error.cluster_error = group_error_bounds;
 
-              auto& node_cluster_bounds = lod_cluster_bounds[i].emplace_back();
-              node_cluster_bounds.center[0] = cluster_bounds.center[0];
-              node_cluster_bounds.center[1] = cluster_bounds.center[1];
-              node_cluster_bounds.center[2] = cluster_bounds.center[2];
-              node_cluster_bounds.radius = cluster_bounds.radius;
-              node_cluster_bounds.normal_cone.apex[0] = cluster_bounds.cone_apex[0];
-              node_cluster_bounds.normal_cone.apex[1] = cluster_bounds.cone_apex[1];
-              node_cluster_bounds.normal_cone.apex[2] = cluster_bounds.cone_apex[2];
-              node_cluster_bounds.normal_cone.axis[0] = cluster_bounds.cone_axis[0];
-              node_cluster_bounds.normal_cone.axis[1] = cluster_bounds.cone_axis[1];
-              node_cluster_bounds.normal_cone.axis[2] = cluster_bounds.cone_axis[2];
-              node_cluster_bounds.normal_cone.cutoff = cluster_bounds.cone_cutoff;
+              auto& node_bounds = lod_cluster_bounds[i].emplace_back();
+              node_bounds.center[0] = cluster_bounds.center[0];
+              node_bounds.center[1] = cluster_bounds.center[1];
+              node_bounds.center[2] = cluster_bounds.center[2];
+              node_bounds.radius = cluster_bounds.radius;
+              node_bounds.normal_cone.apex[0] = cluster_bounds.cone_apex[0];
+              node_bounds.normal_cone.apex[1] = cluster_bounds.cone_apex[1];
+              node_bounds.normal_cone.apex[2] = cluster_bounds.cone_apex[2];
+              node_bounds.normal_cone.axis[0] = cluster_bounds.cone_axis[0];
+              node_bounds.normal_cone.axis[1] = cluster_bounds.cone_axis[1];
+              node_bounds.normal_cone.axis[2] = cluster_bounds.cone_axis[2];
+              node_bounds.normal_cone.cutoff = cluster_bounds.cone_cutoff;
 
               lod_clusters[i].emplace_back(ClusterIndex{
                   .index = parent_index,
@@ -424,6 +405,10 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
               node_error_bounds.cend(),
               std::make_move_iterator(lod_error_bounds[i].cbegin()),
               std::make_move_iterator(lod_error_bounds[i].cend()));
+          node_cluster_bounds.insert(
+              node_cluster_bounds.cend(),
+              std::make_move_iterator(lod_cluster_bounds[i].cbegin()),
+              std::make_move_iterator(lod_cluster_bounds[i].cend()));
           nodes.insert(
               nodes.cend(),
               std::make_move_iterator(lod_nodes[i].cbegin()),
@@ -475,7 +460,8 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
   return ClusterHierarchy{
       .nodes = std::move(nodes),
       .root_nodes = std::move(root_nodes),
-      .error_bounds = std::move(node_error_bounds),
+      .errors = std::move(node_error_bounds),
+      .bounds = std::move(node_cluster_bounds),
       .clusters = std::move(lods.clusters),
       .vertices = std::move(lods.vertices),
       .triangles = std::move(lods.triangles),

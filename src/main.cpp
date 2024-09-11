@@ -133,16 +133,29 @@ int main(int argc, char* argv[]) {
     js_stream << "  aabb: {min: new Float32Array([" << aabb_min[0] << "," << aabb_min[1] << "," << aabb_min[2]
               << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
 
-    js_stream << "  bounds: new Float32Array([";
-    for (size_t i = 0; i < dag.error_bounds.size(); ++i) {
-      const auto& node = dag.error_bounds[i];
+    js_stream << "  errors: new Float32Array([";
+    for (size_t i = 0; i < dag.errors.size(); ++i) {
+      const auto& node = dag.errors[i];
       js_stream << node.parent_error.center[0] << "," << node.parent_error.center[1] << "," << node.parent_error.center[2] << ",";
-      js_stream << node.parent_error.radius << ",";
       js_stream << node.parent_error.error << ",";
       js_stream << node.cluster_error.center[0] << "," << node.cluster_error.center[1] << "," << node.cluster_error.center[2] << ",";
-      js_stream << node.cluster_error.radius << ",";
-      js_stream << node.cluster_error.error << ",";
-      if (i < dag.error_bounds.size() - 1) {
+      js_stream << node.cluster_error.error;
+      if (i < dag.errors.size() - 1) {
+        js_stream << ",";
+      }
+    }
+    js_stream << "]),\n";
+
+    js_stream << "  bounds: new Float32Array([";
+    for (size_t i = 0; i < dag.bounds.size(); ++i) {
+      const auto& node = dag.bounds[i];
+      js_stream << node.center[0] << "," << node.center[1] << "," << node.center[2] << ",";
+      js_stream << node.radius;/* << ",";
+      js_stream << node.normal_cone.apex[0] << "," << node.normal_cone.apex[1] << "," << node.normal_cone.apex[2] << ",";
+      js_stream << node.normal_cone.axis[0] << "," << node.normal_cone.axis[1] << "," << node.normal_cone.axis[2] << ",";
+      js_stream << node.normal_cone.cutoff;
+      */
+      if (i < dag.errors.size() - 1) {
         js_stream << ",";
       }
     }

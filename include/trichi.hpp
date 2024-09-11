@@ -197,7 +197,7 @@ struct ClusterHierarchy {
    * Error bounds of clusters.
    * Used for LOD selection.
    */
-  std::vector<NodeErrorBounds> error_bounds{};
+  std::vector<NodeErrorBounds> errors{};
 
   /**
    * Bounds of clusters.
