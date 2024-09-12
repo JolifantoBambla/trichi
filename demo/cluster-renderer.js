@@ -292,6 +292,37 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         ],
     });
 
+    const selectedInstancesBuffer = device.createBuffer({
+        label: 'selected instances',
+        size: Uint32Array.BYTES_PER_ELEMENT * 2 * mesh.numMeshlets * numInstances,
+        usage: GPUBufferUsage.STORAGE,
+        mappedAtCreation: true,
+    });
+    const selectedInstancesCountBuffer = device.createBuffer({
+        label: 'instance count',
+        size: Uint32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.STORAGE,
+        mappedAtCreation: true,
+    });
+    (new Uint32Array(selectedInstancesBuffer.getMappedRange())).set(new Uint32Array(Array(mesh.numMeshlets * numInstances).fill(0).map((_, c) => {
+        return [
+            Math.floor(c / mesh.numMeshlets),
+            c,
+        ];
+    }).flat()));
+    (new Uint32Array(selectedInstancesCountBuffer.getMappedRange())).set(new Uint32Array([mesh.numMeshlets  * numInstances]));
+    selectedInstancesBuffer.unmap();
+    selectedInstancesCountBuffer.unmap();
+
+    const cullClustersSelectedInstancesBindGroups = device.createBindGroup({
+        label: 'selected instances',
+        layout: bindGroupLayouts.selectedClustersLayout,
+        entries: [
+            {binding: 0, resource: {buffer: selectedInstancesBuffer}},
+            {binding: 1, resource: {buffer: selectedInstancesCountBuffer}},
+        ],
+    });
+
     const lodBuffers = [];
     const lodCountBuffers = [];
     const cullClustersLodBindGroups = [];
@@ -402,9 +433,9 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
             cullingPass.setPipeline(cullClustersPipeline);
             cullingPass.setBindGroup(0, cullingUniformsBindGroup);
             cullingPass.setBindGroup(1, cullClustersMeshletBindGroup);
-            cullingPass.setBindGroup(2, cullClustersLodBindGroups[lod]);
+            cullingPass.setBindGroup(2, cullClustersSelectedInstancesBindGroups);//cullClustersLodBindGroups[lod]);
             cullingPass.setBindGroup(3, cullClustersResultBindGroup);
-            cullingPass.dispatchWorkgroups(Math.ceil((numLodClusters(lod) * numInstances) / 256));
+            cullingPass.dispatchWorkgroups(Math.ceil((mesh.numMeshlets * numInstances) / 256));
             cullingPass.end();
 
             const geometryPass = commandEncoder.beginRenderPass({

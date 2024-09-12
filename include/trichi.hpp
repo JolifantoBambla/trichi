@@ -55,13 +55,21 @@ struct TriChiParams {
 };
 
 /**
- * A cluster's / cluster group's bounding sphere and simplification error.
+ * A cluster group's bounding sphere and simplification error.
+ *
+ * A cluster group's error bounds conservatively bound all its child groups.
+ * It is not a tight bound of the cluster's / cluster group's vertices and is suboptimal for frustum culling.
  */
 struct ErrorBounds {
   /**
    * The bounding sphere's center.
    */
   float center[3]{};
+
+  /**
+   * The bounding sphere's radius.
+   */
+  float radius = 0.0;
 
   /**
    * The cluster's absolute simplification error.

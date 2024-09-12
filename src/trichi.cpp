@@ -6,10 +6,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <fstream>
 #include <iostream>  // todo: remove
 #include <numeric>
+#include <valarray>
 
 #include "meshoptimizer.h"
 #include "metis.h"
@@ -191,10 +191,12 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
     node_error_bounds[i].parent_error.center[0] = cluster_bounds.center[0];
     node_error_bounds[i].parent_error.center[1] = cluster_bounds.center[1];
     node_error_bounds[i].parent_error.center[2] = cluster_bounds.center[2];
+    node_error_bounds[i].parent_error.radius = cluster_bounds.radius;
     node_error_bounds[i].parent_error.error = std::numeric_limits<float>::max();
     node_error_bounds[i].cluster_error.center[0] = cluster_bounds.center[0];
     node_error_bounds[i].cluster_error.center[1] = cluster_bounds.center[1];
     node_error_bounds[i].cluster_error.center[2] = cluster_bounds.center[2];
+    node_error_bounds[i].cluster_error.radius = cluster_bounds.radius;
     node_error_bounds[i].cluster_error.error = 0.0;
 
     node_cluster_bounds[i].center[0] = cluster_bounds.center[0];
@@ -282,24 +284,37 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
             num_new_triangles += group_meshlets.triangles.size();
             num_next_clusters += group_meshlets.clusters.size();
 
-            meshopt_Bounds group_bounds = meshopt_computeClusterBounds(
-                group_indices.data(),
-                group_indices.size(),
-                vertices.data(),
-                vertex_count,
-                vertex_stride);
-
+            // merge error bounds to conservatively bound all child groups
+            // the error bounds don't have to be a tight sphere around the group but must ensure monotonicity of the change in error from the root to its leaves
+            // see Federico Ponchio, "Multiresolution structures for interactive visualization of very large 3D datasets", Section 4.2.3
+            //
+            // we use the method from meshoptimizer's nanite demo
+            // https://github.com/zeux/meshoptimizer/blob/bfbbaddf38d6fc2311ba66762c6f7656a7c8dd79/demo/nanite.cpp#L67
+            float group_bounds_center[3] = {0.0, 0.0, 0.0};
+            float group_bounds_center_weight = 0.0;
+            for (const size_t cluster_index : group) {
+              const auto& child_error = node_error_bounds[cluster_pool[cluster_index].index].cluster_error;
+              group_bounds_center[0] += child_error.center[0] * child_error.radius;
+              group_bounds_center[1] += child_error.center[1] * child_error.radius;
+              group_bounds_center[2] += child_error.center[2] * child_error.radius;
+              group_bounds_center_weight += child_error.radius;
+            }
             ErrorBounds group_error_bounds{};
-            group_error_bounds.center[0] = group_bounds.center[0];
-            group_error_bounds.center[1] = group_bounds.center[1];
-            group_error_bounds.center[2] = group_bounds.center[2];
-            group_error_bounds.error = std::accumulate(
-                group.cbegin(),
-                group.cend(),
-                error,
-                [&cluster_pool, &node_error_bounds](const float max_error, const size_t cluster_index) {
-                  return std::max(max_error, node_error_bounds[cluster_pool[cluster_index].index].cluster_error.error);
-                });
+            group_error_bounds.center[0] = group_bounds_center[0] / group_bounds_center_weight;
+            group_error_bounds.center[1] = group_bounds_center[1] / group_bounds_center_weight;
+            group_error_bounds.center[2] = group_bounds_center[2] / group_bounds_center_weight;
+            group_error_bounds.radius = 0.0;
+            group_error_bounds.error = error;
+            for (const size_t cluster_index : group) {
+              const auto& child_error = node_error_bounds[cluster_pool[cluster_index].index].cluster_error;
+              float dist[3] = {
+                  group_error_bounds.center[0] - child_error.center[0],
+                  group_error_bounds.center[1] - child_error.center[1],
+                  group_error_bounds.center[2] - child_error.center[2],
+              };
+              group_error_bounds.radius = std::max(group_error_bounds.radius, child_error.radius + std::sqrt(dist[0] * dist[0] + dist[1] * dist[1] + dist[2] * dist[2]));
+              group_error_bounds.error = std::max(group_error_bounds.error, child_error.error);
+            }
 
             std::vector<size_t> child_node_indices{};
             child_node_indices.reserve(group.size());
@@ -320,9 +335,10 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
                   vertex_stride);
 
               auto& node_error = lod_error_bounds[i].emplace_back();
-              node_error.parent_error.center[0] = cluster_bounds.center[0];
-              node_error.parent_error.center[1] = cluster_bounds.center[1];
-              node_error.parent_error.center[2] = cluster_bounds.center[2];
+              node_error.parent_error.center[0] = group_error_bounds.center[0];
+              node_error.parent_error.center[1] = group_error_bounds.center[1];
+              node_error.parent_error.center[2] = group_error_bounds.center[2];
+              node_error.parent_error.radius = std::numeric_limits<float>::max();
               node_error.parent_error.error = std::numeric_limits<float>::max();
               node_error.cluster_error = group_error_bounds;
 

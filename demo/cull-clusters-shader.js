@@ -1,4 +1,6 @@
 export const cullClustersShader = `
+const f32_max: f32 = 3.40282e+38;
+
 override WORKGROUP_SIZE: u32 = 256u;
 override MAX_TRIANGLES_PER_CLUSTER: u32 = 128;
 
@@ -35,6 +37,7 @@ struct DrawIndirectArgs {
 
 struct GroupError {
     center: vec3<f32>,
+    radius: f32,
     error: f32,
 }
 
@@ -55,7 +58,7 @@ struct ClusterBounds {
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
-@group(1) @binding(1) var<storage> error_bounds: array<ErrorBounds>;
+@group(1) @binding(1) var<storage> error_bounds: array<f32>;
 @group(1) @binding(2) var<storage> cluster_bounds: array<ClusterBounds>;
 
 // selected clusters
@@ -66,21 +69,45 @@ struct ClusterBounds {
 @group(3) @binding(0) var<storage, read_write> visible_cluster_instances: array<ClusterInstance>;
 @group(3) @binding(1) var<storage, read_write> render_clusters_args: DrawIndirectArgs;
 
+// https://stackoverflow.com/questions/21648630/radius-of-projected-sphere-in-screen-space
+fn projected_screen_size(transform: mat4x4<f32>, center: vec3<f32>, radius: f32, cot_half_fov: f32, h: f32) -> f32 {
+    let c = (transform * vec4<f32>(center, 1.0f)).xyz;
+    return (cot_half_fov * radius * h) / (2.0 * sqrt(max(0.0, dot(c, c) - radius * radius)));
+}
+
 fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
-  let center = (transform * vec4<f32>(bounds.center, 1.0f)).xyz;
-  let radius = (error_config.cot_half_fov * bounds.error) / sqrt(max(0.0, dot(center, center) - bounds.error * bounds.error));
-  return (radius * error_config.view_height) / 2.0;
+    /*
+    let size = projected_screen_size(transform, bounds.center, bounds.radius, error_config.cot_half_fov, error_config.view_height);
+    if size == 0 {
+        return f32_max;
+    } else {
+        return bounds.error / size;
+    }
+    */
+    return projected_screen_size(transform, bounds.center, bounds.error, error_config.cot_half_fov, error_config.view_height);
 }
 
 fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds) -> bool {
-  let cluster_error = project_error_bounds(transform, bounds.cluster_error);
-  let parent_error = project_error_bounds(transform, bounds.parent_error);
-  return parent_error > error_config.threshold && cluster_error <= error_config.threshold;
+    let cluster_error = project_error_bounds(transform, bounds.cluster_error);
+    let parent_error = project_error_bounds(transform, bounds.parent_error);
+    return parent_error > error_config.threshold && cluster_error <= error_config.threshold;
 }
 
-// todo: output new error format
-// todo: output new bounds format
-// todo: add error_config buffer (with threshold slider in ui)
+fn get_error_bounds(cluster_index: u32) -> ErrorBounds {
+    let index = cluster_index * 5 * 2;
+    return ErrorBounds(
+        GroupError(
+            vec3<f32>(error_bounds[index + 0], error_bounds[index + 1], error_bounds[index + 2]),   // center
+            error_bounds[index + 3],                                                                // radius
+            error_bounds[index + 4],                                                                // error
+        ),
+        GroupError(
+            vec3<f32>(error_bounds[index + 5], error_bounds[index + 6], error_bounds[index + 7]),   // center
+            error_bounds[index + 8],                                                                // radius
+            error_bounds[index + 9],                                                                // error
+        ),
+    );
+}
 
 @compute
 @workgroup_size(WORKGROUP_SIZE, 1, 1)
@@ -92,7 +119,7 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
     }
 
     let cluster_instance = cluster_instances[thread_id];
-    let error = error_bounds[cluster_instance.cluster_index];
+    let error = get_error_bounds(cluster_instance.cluster_index);
     let bounds = cluster_bounds[cluster_instance.cluster_index];
     let transform = instances[cluster_instance.instance_index].model;
 

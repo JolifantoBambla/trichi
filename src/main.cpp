@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
     float aabb_max[3] = {
         std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min()};
 
-    std::ofstream js_stream("/home/lherzberger/Projects/per-meshlet-nuances/demo/demo-mesh.js");
+    std::ofstream js_stream("/home/lukas/Projects/trichi/demo/demo-mesh.js");
     js_stream << "export const mesh = {\n";
     js_stream << "  vertices: new Float32Array([";
     for (size_t i = 0; i < vertices.size(); ++i) {
@@ -137,8 +137,10 @@ int main(int argc, char* argv[]) {
     for (size_t i = 0; i < dag.errors.size(); ++i) {
       const auto& node = dag.errors[i];
       js_stream << node.parent_error.center[0] << "," << node.parent_error.center[1] << "," << node.parent_error.center[2] << ",";
+      js_stream << node.parent_error.radius << ",";
       js_stream << node.parent_error.error << ",";
       js_stream << node.cluster_error.center[0] << "," << node.cluster_error.center[1] << "," << node.cluster_error.center[2] << ",";
+      js_stream << node.cluster_error.radius << ",";
       js_stream << node.cluster_error.error;
       if (i < dag.errors.size() - 1) {
         js_stream << ",";
