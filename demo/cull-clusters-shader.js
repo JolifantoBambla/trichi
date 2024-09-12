@@ -1,4 +1,6 @@
 export const cullClustersShader = `
+const f32_max: f32 = 3.40282e+38;
+
 override WORKGROUP_SIZE: u32 = 256u;
 override MAX_TRIANGLES_PER_CLUSTER: u32 = 128;
 
@@ -8,6 +10,13 @@ struct Camera {
     position: vec3<f32>,
     pad: f32,
     frustum: array<vec4<f32>, 5>,
+}
+
+struct ErrorConfig {
+    cot_half_fov: f32,
+    view_height: f32,
+    threshold: f32,
+    pad: f32,
 }
 
 struct Instance {
@@ -26,21 +35,31 @@ struct DrawIndirectArgs {
     first_instance: u32,
 }
 
+struct GroupError {
+    center: vec3<f32>,
+    radius: f32,
+    error: f32,
+}
+
+struct ErrorBounds {
+    parent_error: GroupError,
+    cluster_error: GroupError,
+}
+
 struct ClusterBounds {
     center: vec3<f32>,
     radius: f32,
-    cone_axis: vec3<f32>,
-    error: f32,
-    cone_apex: vec3<f32>,
-    cone_cutoff: f32,
+    // todo: normal cone?
 }
 
 // per frame uniforms
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<uniform> error_config: ErrorConfig;
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
-@group(1) @binding(1) var<storage> cluster_bounds: array<f32>;
+@group(1) @binding(1) var<storage> error_bounds: array<f32>;
+@group(1) @binding(2) var<storage> cluster_bounds: array<ClusterBounds>;
 
 // selected clusters
 @group(2) @binding(0) var<storage> cluster_instances: array<ClusterInstance>;
@@ -50,15 +69,40 @@ struct ClusterBounds {
 @group(3) @binding(0) var<storage, read_write> visible_cluster_instances: array<ClusterInstance>;
 @group(3) @binding(1) var<storage, read_write> render_clusters_args: DrawIndirectArgs;
 
-fn get_bounds(index: u32) -> ClusterBounds {
-    let bounds_index = index * 48;
-    return ClusterBounds(
-        vec3<f32>(cluster_bounds[index + 0], cluster_bounds[index + 1], cluster_bounds[index + 2]),
-        cluster_bounds[index + 3],
-        vec3<f32>(cluster_bounds[index + 4], cluster_bounds[index + 5], cluster_bounds[index + 6]),
-        cluster_bounds[index + 7],
-        vec3<f32>(cluster_bounds[index + 8], cluster_bounds[index + 9], cluster_bounds[index + 10]),
-        cluster_bounds[index + 11],
+// https://stackoverflow.com/questions/21648630/radius-of-projected-sphere-in-screen-space
+fn projected_screen_size(transform: mat4x4<f32>, center: vec3<f32>, radius: f32, cot_half_fov: f32, h: f32) -> f32 {
+    let c = (transform * vec4<f32>(center, 1.0f)).xyz;
+    return (cot_half_fov * radius * h) / (2.0 * sqrt(max(0.0, dot(c, c) - radius * radius)));
+}
+
+fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
+    let size = projected_screen_size(transform, bounds.center, bounds.radius, error_config.cot_half_fov, error_config.view_height);
+    if size == 0 {
+        return f32_max;
+    } else {
+        return size * bounds.error;
+    }
+}
+
+fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds) -> bool {
+    let cluster_error = project_error_bounds(transform, bounds.cluster_error);
+    let parent_error = project_error_bounds(transform, bounds.parent_error);
+    return parent_error > error_config.threshold && cluster_error <= error_config.threshold;
+}
+
+fn get_error_bounds(cluster_index: u32) -> ErrorBounds {
+    let index = cluster_index * 5 * 2;
+    return ErrorBounds(
+        GroupError(
+            vec3<f32>(error_bounds[index + 0], error_bounds[index + 1], error_bounds[index + 2]),   // center
+            error_bounds[index + 3],                                                                // radius
+            error_bounds[index + 4],                                                                // error
+        ),
+        GroupError(
+            vec3<f32>(error_bounds[index + 5], error_bounds[index + 6], error_bounds[index + 7]),   // center
+            error_bounds[index + 8],                                                                // radius
+            error_bounds[index + 9],                                                                // error
+        ),
     );
 }
 
@@ -72,8 +116,13 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
     }
 
     let cluster_instance = cluster_instances[thread_id];
-    let bounds = get_bounds(cluster_instance.cluster_index);
+    let error = get_error_bounds(cluster_instance.cluster_index);
+    let bounds = cluster_bounds[cluster_instance.cluster_index];
     let transform = instances[cluster_instance.instance_index].model;
+
+    if !is_selected_lod(camera.projection * camera.view * transform, error) {
+        return;
+    }
 
     // frustum culling
     let center = (transform * vec4(bounds.center, 1.0)).xyz;

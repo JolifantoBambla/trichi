@@ -1,15 +1,16 @@
-//
-// Created by lukas on 28.08.24.
-//
+/**
+* Copyright (c) 2024 Lukas Herzberger
+* SPDX-License-Identifier: MIT
+*/
 
 #ifndef TRICHI_UTIL_HPP
 #define TRICHI_UTIL_HPP
 
-#include <algorithm>  // std::set_intersection
-#include <cstdint>    // uint64_t
+#include <algorithm>          // std::set_intersection
+#include <cstdint>            // uint64_t
 
 #ifdef TRICHI_PARALLEL
-#include "BS_thread_pool.hpp"
+#include "BS_thread_pool.hpp" // thread_pool
 #endif //TRICHI_PARALLEL
 
 namespace trichi {

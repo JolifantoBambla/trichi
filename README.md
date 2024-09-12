@@ -1,4 +1,4 @@
-# Tri Chi: Triangle Cluster Hierarchy
+# Tri Chi: Triangle ClusterIndex Hierarchy
 
 A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
@@ -11,7 +11,7 @@ Note that this library only preprocesses triangle meshes but does not provide an
 The API is not yet stable and the implementation is neither optimized for runtime performance nor quality.
 If you want to help change that, any help is more than welcome :)
 
-Preprocessing a 4.3 million triangle mesh takes about 2 minutes.
+Preprocessing a 4.3 million triangle mesh sequentially takes about 100 seconds, and 75 seconds in parallel.
 
 ## Getting Started
 
