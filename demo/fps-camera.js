@@ -14,7 +14,7 @@ export class FPSCameraController {
     #pitch;
     #yaw;
 
-    constructor(canvas, {position = [0, 1, 100], pitch = 0.36, yaw = 0.06, acceleration = 2.0, maxSpeed = 0.1, pointerSensitivity = 0.002, decay = 0.9} = {}) {
+    constructor(canvas, {position = [1, -1, -13], pitch = 0.0, yaw = 160.0, acceleration = 1.0, maxSpeed = 0.01, pointerSensitivity = 0.002, decay = 0.9} = {}) {
         this.#position = vec3n.create(...position);
         this.#pitch = pitch;
         this.#yaw = yaw;

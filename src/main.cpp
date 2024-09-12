@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
       js_stream << dag.clusters[i].triangle_offset << ",";
       js_stream << dag.clusters[i].vertex_count << ",";
       js_stream << dag.clusters[i].triangle_count;
-      if (i != dag.clusters.size() - 1) {
+w      if (i != dag.clusters.size() - 1) {
         js_stream << ",";
       }
     }
