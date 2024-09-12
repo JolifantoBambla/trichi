@@ -76,15 +76,12 @@ fn projected_screen_size(transform: mat4x4<f32>, center: vec3<f32>, radius: f32,
 }
 
 fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
-    /*
     let size = projected_screen_size(transform, bounds.center, bounds.radius, error_config.cot_half_fov, error_config.view_height);
     if size == 0 {
         return f32_max;
     } else {
-        return bounds.error / size;
+        return size * bounds.error;
     }
-    */
-    return projected_screen_size(transform, bounds.center, bounds.error, error_config.cot_half_fov, error_config.view_height);
 }
 
 fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds) -> bool {
