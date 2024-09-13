@@ -25,17 +25,14 @@ target_link_libraries(${YOUR_TARGET} trichi)
 
 ### CMake options
 
-Build with Metis
-
-Build Multithreaded
+ - `TRICHI_PARALLEL`: build multithreaded version
 
 ## Usage
 
 ```cpp
 #include "trichi.hpp"
 
-// todo: docs & api
-trichi::build_cluster_hierarchy(/* ... */);
+const auto clusterHierarchy = trichi::build_cluster_hierarchy(/* ... */);
 ```
 
 
