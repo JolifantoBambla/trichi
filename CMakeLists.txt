@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.14)
 project(trichi
         VERSION 0.1.0
         DESCRIPTION "Creates a hierarchical triangle cluster DAG"
@@ -9,21 +9,14 @@ project(trichi
 set(CMAKE_CXX_STANDARD 20)
 
 option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
+option(TRICHI_BUILD_CLI "Build cli" ON)
 
 # add dependencies
 include(cmake/CPM.cmake)
 
 CPMAddPackage("gh:zeux/meshoptimizer#v0.21")
 include(cmake/metis.cmake)
-CPMAddPackage("gh:nmwsharp/geometry-central#v0.1.0") # todo: remove
-CPMAddPackage("gh:assimp/assimp#v5.4.2")
-CPMAddPackage(
-        NAME BS_thread_pool
-        GITHUB_REPOSITORY bshoshany/thread-pool
-        VERSION 4.1.0)
-add_library(BS_thread_pool INTERFACE)
-target_include_directories(BS_thread_pool INTERFACE ${BS_thread_pool_SOURCE_DIR}/include)
-CPMAddPackage("gh:p-ranav/argparse#v3.0") # todo: move to own subdirectory with example target
+include(cmake/thread-pool.cmake)
 
 # lib
 add_library(trichi
@@ -38,19 +31,23 @@ target_include_directories(trichi PRIVATE
 target_link_libraries(trichi
         meshoptimizer
         libmetis
-        geometry-central
-        BS_thread_pool
 )
 
 if (TRICHI_PARALLEL)
+    target_link_libraries(trichi BS_thread_pool)
     target_compile_definitions(trichi PRIVATE TRICHI_PARALLEL)
 endif (TRICHI_PARALLEL)
 
 # example
 # todo: move to own subdirectory
-add_executable(example
-        src/main.cpp)
-target_link_libraries(example
-        trichi
-        assimp
-        argparse::argparse)
+if (TRICHI_BUILD_CLI)
+    CPMAddPackage("gh:assimp/assimp#v5.4.2")
+    CPMAddPackage("gh:p-ranav/argparse#v3.0")
+
+    add_executable(example
+            src/main.cpp)
+    target_link_libraries(example
+            trichi
+            assimp
+            argparse::argparse)
+endif (TRICHI_BUILD_CLI)
