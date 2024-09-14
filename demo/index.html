@@ -150,6 +150,21 @@
             presentBindGroup,
         };
 
+        // from Nexus
+        // https://github.com/cnr-isti-vclab/nexus/blob/ae6bf8601303884250d3c73b9e1d4cbe179f9b92/src/common/frustum.cpp#L49
+        const setErrorProjectionParams = _ => {
+            const invProj = mat4n.inverse(resolutionDependentStuff.projection);
+            const c = vec3n.transformMat4(vec3n.create(0, 0, 1), invProj);
+            const s = vec3n.transformMat4(vec3n.create(1, 0, 1), invProj);
+            const zNear = vec3n.length(c);
+            const side = vec3n.length(vec3n.subtract(s, c));
+            resolutionDependentStuff.errorProjectionParams = {
+                resolution: (2.0 * side / zNear) / resolution[1],
+                zNear,
+            };
+        };
+        setErrorProjectionParams();
+
         let resizeInProgress = false;
         const handleResize = _ => {
             resolution[0] = canvas.clientWidth * window.devicePixelRatio;
@@ -184,6 +199,8 @@
                     },
                 ],
             });
+
+            setErrorProjectionParams();
 
             resizeInProgress = false;
         };
@@ -220,8 +237,8 @@
                     projection: resolutionDependentStuff.projection,
                     position: cameraController.position,
                 },
-                {instances: [mat4n.identity()]}, //[mat4n.scaling(clusterScale)]});
-                {cotHalfFov: 1.0 / Math.tan(fovRad / 2.0), viewHeight: resolution[1], threshold: params.renderSettings.errorThreshold},
+                {instances: [mat4n.identity()]},
+                {...resolutionDependentStuff.errorProjectionParams, threshold: params.renderSettings.errorThreshold},
                 params.renderSettings.updateCullingCamera,
             );
 
