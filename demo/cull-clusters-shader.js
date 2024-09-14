@@ -12,9 +12,9 @@ struct Camera {
     frustum: array<vec4<f32>, 5>,
 }
 
-struct ErrorConfig {
-    cot_half_fov: f32,
-    view_height: f32,
+struct ErrorProjectionParams {
+    resolution: f32,
+    z_near: f32,
     threshold: f32,
     pad: f32,
 }
@@ -54,7 +54,7 @@ struct ClusterBounds {
 
 // per frame uniforms
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(0) @binding(1) var<uniform> error_config: ErrorConfig;
+@group(0) @binding(1) var<uniform> error_projection_params: ErrorProjectionParams;
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
@@ -69,25 +69,28 @@ struct ClusterBounds {
 @group(3) @binding(0) var<storage, read_write> visible_cluster_instances: array<ClusterInstance>;
 @group(3) @binding(1) var<storage, read_write> render_clusters_args: DrawIndirectArgs;
 
-// https://stackoverflow.com/questions/21648630/radius-of-projected-sphere-in-screen-space
-fn projected_screen_size(transform: mat4x4<f32>, center: vec3<f32>, radius: f32, cot_half_fov: f32, h: f32) -> f32 {
-    let c = (transform * vec4<f32>(center, 1.0f)).xyz;
-    return (cot_half_fov * radius * h) / (2.0 * sqrt(max(0.0, dot(c, c) - radius * radius)));
-}
-
+// from Nexus
+// https://github.com/cnr-isti-vclab/nexus/blob/ae6bf8601303884250d3c73b9e1d4cbe179f9b92/src/common/metric.h#L53
 fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
-    let size = projected_screen_size(transform, bounds.center, bounds.radius, error_config.cot_half_fov, error_config.view_height);
-    if size == 0 {
+    if bounds.error == 0.0 || bounds.error == f32_max {
+        return bounds.error;
+    }
+    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - bounds.radius;
+    if dist < error_projection_params.z_near {
+        dist = error_projection_params.z_near;
+    }
+    let size = dist * error_projection_params.resolution;
+    if size <= 0.00001 {
         return f32_max;
     } else {
-        return size * bounds.error;
+        return bounds.error / size;
     }
 }
 
 fn is_selected_lod(transform: mat4x4<f32>, bounds: ErrorBounds) -> bool {
     let cluster_error = project_error_bounds(transform, bounds.cluster_error);
     let parent_error = project_error_bounds(transform, bounds.parent_error);
-    return parent_error > error_config.threshold && cluster_error <= error_config.threshold;
+    return parent_error > error_projection_params.threshold && cluster_error <= error_projection_params.threshold;
 }
 
 fn get_error_bounds(cluster_index: u32) -> ErrorBounds {
@@ -120,7 +123,7 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
     let bounds = cluster_bounds[cluster_instance.cluster_index];
     let transform = instances[cluster_instance.instance_index].model;
 
-    if !is_selected_lod(camera.projection * camera.view * transform, error) {
+    if !is_selected_lod(transform, error) {
         return;
     }
 
