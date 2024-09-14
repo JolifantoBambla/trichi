@@ -258,9 +258,10 @@ ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, c
       bool simplified = group.size() != 1;
       if (simplified) {
         const auto group_indices = merge_group(cluster_pool, lods, group, max_triangles);
+        const auto corrected_index_count = std::min(simplify_target_index_count, group_indices.size());
 
         const size_t target_index_count =
-            group.size() <= 2 ? simplify_target_index_count / 2 : simplify_target_index_count;
+            group.size() <= 2 ? corrected_index_count / 2 : corrected_index_count;
         const auto [simplified_indices, error] = simplify_group(
             group_indices, vertices, vertex_count, vertex_stride, target_index_count, simplify_target_error);
 

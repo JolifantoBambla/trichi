@@ -27,6 +27,12 @@ target_link_libraries(${YOUR_TARGET} trichi)
 
  - `TRICHI_PARALLEL`: build multithreaded version
 
+### Build WASM
+
+```
+mkdir build && cd build && cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -G "Ninja" .. && cmake --build . --target trichi-wasm
+```
+
 ## Usage
 
 ```cpp

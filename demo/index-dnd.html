@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshlet Playground</title>
+</head>
+<body>
+<div class="container">
+    <canvas id="canvas" style="width: 99%; height: 99%; position: absolute"></canvas>
+    <div id="ui" style="position: absolute; right: 0; z-index: 1;"></div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/assimpjs@0.0.10/dist/assimpjs.min.js"></script>
+<script src="./trichi/trichi-wasm.js"></script>
+
+<script type="module">
+    import {vec3n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
+    import {FPSCameraController} from './fps-camera.js';
+    import {makeUi} from './ui.js';
+    import {webgpuNotSupported} from './util.js';
+    import {makeClusterRenderer} from './cluster-renderer-dnd.js';
+    import {mesh} from './demo-mesh.js';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const useTimestampQuery = urlParams.has('timestamp_query');
+
+    async function main([assimp, trichi]) {
+        if (!('gpu' in navigator)) {
+            webgpuNotSupported();
+            return;
+        }
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            webgpuNotSupported();
+            return;
+        }
+        console.info('Available adapter features', [...adapter.features]);
+
+        const deviceFeatures = [];
+        if (useTimestampQuery && adapter.features.has('timestamp-query')) {
+            deviceFeatures.push('timestamp-query');
+        }
+
+        const device = await adapter.requestDevice({requiredFeatures: deviceFeatures});
+        console.info('Enabled device features', [...device.features]);
+
+        const canvas = document.querySelector('canvas');
+        const resolution = [canvas.clientWidth, canvas.clientHeight].map(s => s * window.devicePixelRatio);
+        canvas.width = resolution[0];
+        canvas.height = resolution[1];
+
+        if (device.features.has('timestamp-query')) {
+            // todo: timings
+        }
+
+        const context = canvas.getContext('webgpu');
+        const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({
+            device,
+            format: presentationFormat,
+        });
+
+        const cameraController = new FPSCameraController(canvas);
+
+        const fovRad = 45.0 * (Math.PI / 180.0);
+        const projection = mat4n.perspectiveReverseZ(
+            fovRad,
+            resolution[0] / resolution[1],
+            1.0,
+        );
+
+        const backBuffer = device.createTexture({
+            size: resolution,
+            format: 'rgba16float',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        const backBufferView = backBuffer.createView();
+
+        const depthBuffer = device.createTexture({
+            size: resolution,
+            format: 'depth24plus',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        const depthBufferView = depthBuffer.createView();
+
+        function makePipeline() {
+            const module = device.createShaderModule({
+                code: `
+                    @group(0) @binding(0) var backbuffer: texture_2d<f32>;
+
+                    @vertex
+                    fn vertex(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        return vec4(vec2(f32((vertex_index << 1) & 2), f32(vertex_index & 2)) * 2 - 1, 0, 1);
+                    }
+
+                    fn coords_in_rect(coords: vec2<u32>, rect_min: vec2<u32>, rect_max: vec2<u32>) -> bool {
+                        return all(coords >= rect_min) && all(coords < rect_max);
+                    }
+
+                    @fragment
+                    fn fragment(@builtin(position) coord: vec4<f32>) -> @location(0) vec4<f32> {
+                        let texture_coords = vec2<u32>(floor(coord.xy));
+
+                        let backbuffer_size = textureDimensions(backbuffer, 0).xy;
+
+                        if coords_in_rect(texture_coords, vec2<u32>(), backbuffer_size) {
+                            let rgb = textureLoad(backbuffer, texture_coords, 0).rgb;
+                            return vec4(rgb, 1.0);
+                        } else {
+                            return vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                    }
+                    `,
+            });
+            return device.createRenderPipeline({
+                label: 'present',
+                layout: 'auto',
+                vertex: {
+                    module,
+                },
+                fragment: {
+                    module,
+                    targets: [{format: presentationFormat}],
+                },
+            });
+        }
+
+        const presentPipeline = makePipeline();
+        const presentBindGroup = device.createBindGroup({
+            label: 'present',
+            layout: presentPipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: backBufferView,
+                },
+            ],
+        });
+
+        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, mesh, true);
+
+        const resolutionDependentStuff = {
+            projection,
+            backBuffer,
+            backBufferView,
+            depthBuffer,
+            depthBufferView,
+            presentBindGroup,
+        };
+
+        // from Nexus
+        // https://github.com/cnr-isti-vclab/nexus/blob/ae6bf8601303884250d3c73b9e1d4cbe179f9b92/src/common/frustum.cpp#L49
+        const setErrorProjectionParams = _ => {
+            const invProj = mat4n.inverse(resolutionDependentStuff.projection);
+            const c = vec3n.transformMat4(vec3n.create(0, 0, 1), invProj);
+            const s = vec3n.transformMat4(vec3n.create(1, 0, 1), invProj);
+            const zNear = vec3n.length(c);
+            const side = vec3n.length(vec3n.subtract(s, c));
+            resolutionDependentStuff.errorProjectionParams = {
+                resolution: (2.0 * side / zNear) / resolution[1],
+                zNear,
+            };
+        };
+        setErrorProjectionParams();
+
+        let resizeInProgress = false;
+        const handleResize = _ => {
+            resolution[0] = canvas.clientWidth * window.devicePixelRatio;
+            resolution[1] = canvas.clientHeight * window.devicePixelRatio;
+
+            canvas.width = resolution[0];
+            canvas.height = resolution[1];
+
+            resolutionDependentStuff.projection = mat4n.perspectiveReverseZ(
+                fovRad,
+                resolution[0] / resolution[1],
+                1.0,
+            );
+            resolutionDependentStuff.backBuffer = device.createTexture({
+                size: resolution,
+                format: 'rgba16float',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+            resolutionDependentStuff.backBufferView = resolutionDependentStuff.backBuffer.createView();
+            resolutionDependentStuff.depthBuffer = device.createTexture({
+                size: resolution,
+                format: 'depth24plus',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+            resolutionDependentStuff.depthBufferView = resolutionDependentStuff.depthBuffer.createView();
+            resolutionDependentStuff.presentBindGroup = device.createBindGroup({
+                layout: presentPipeline.getBindGroupLayout(0),
+                entries: [
+                    {
+                        binding: 0,
+                        resource: resolutionDependentStuff.backBufferView,
+                    },
+                ],
+            });
+
+            setErrorProjectionParams();
+
+            resizeInProgress = false;
+        };
+
+        let timeout = false;
+        window.addEventListener('resize', _ => {
+            resizeInProgress = true;
+            clearTimeout(timeout);
+            timeout = setTimeout(handleResize, 250);
+        });
+
+        let transform = mat4n.identity();
+
+        // todo: debounce
+        const dropZoneId = 'container';
+        ['dragenter', 'dragover', 'drop'].forEach(eventName => {
+            window.addEventListener(eventName, e => {
+                if (e.target.id !== dropZoneId) {
+                    e.preventDefault();
+                    if (eventName === 'drop') {
+                        e.dataTransfer.dropEffect = 'move';
+                        Promise.all([...e.dataTransfer.items]
+                            .filter(i => i.kind === 'file')
+                            .map(async f => {
+                                const file = f.getAsFile();
+                                return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+                            })
+                        ).then(files => {
+                            const assimpFiles = assimp.ConvertFileList(
+                                files.reduce((acc, f) => {
+                                    console.log('loaded', f.name);
+                                    acc.AddFile(f.name, f.bytes);
+                                    return acc;
+                                }, new assimp.FileList()),
+                                'assjson',
+                            );
+                            if (!assimpFiles.IsSuccess() || assimpFiles.FileCount() === 0) {
+                                console.log(assimpFiles.GetErrorCode());
+                                return;
+                            }
+                            console.log('parsed');
+                            const assimpMesh = JSON.parse(new TextDecoder().decode(assimpFiles.GetFile(0).GetContent()));
+
+                            const indices = new Uint32Array(assimpMesh.meshes[0].faces.flat());
+                            const vertices = new Float32Array(assimpMesh.meshes[0].vertices);
+
+                            const aabb = {
+                                min: [vertices[0], vertices[1], vertices[2]],
+                                max: [vertices[0], vertices[1], vertices[2]],
+                            };
+                            for (let i = 3; i < vertices.length; i += 3) {
+                                aabb.min[0] = Math.min(aabb.min[0], vertices[i]);
+                                aabb.min[1] = Math.min(aabb.min[1], vertices[i + 1]);
+                                aabb.min[2] = Math.min(aabb.min[2], vertices[i + 2]);
+                                aabb.max[0] = Math.max(aabb.max[0], vertices[i]);
+                                aabb.max[1] = Math.max(aabb.max[1], vertices[i + 1]);
+                                aabb.max[2] = Math.max(aabb.max[2], vertices[i + 2]);
+                            }
+
+                            const diag = [
+                                aabb.max[0] - aabb.min[0],
+                                aabb.max[1] - aabb.min[1],
+                                aabb.max[2] - aabb.min[2],
+                            ];
+                            const translation = mat4n.translation([-diag[0] / 2, -diag[1] / 2, -diag[2] / 2]);
+                            const scale = mat4n.uniformScaling(10.0 / Math.max(...diag));
+                            const trans = mat4n.multiply(translation, scale);
+
+                            const hierarchy = trichi.buildTriangleClusterHierarchy(
+                                indices, vertices, 12, {
+                                    maxVerticesPerCluster: 64,
+                                    maxTrianglesPerCluster: 128,
+                                    clusterConeWeight: 0.0,
+                                    targetClustersPerGroup: 4,
+                                    maxHierarchyDepth: 25,
+                                    threadPoolSize: 1,
+                                    storeHierarchy: true,
+                                }
+                            );
+
+                            const triangles = [];
+                            for (let i = 0; i < hierarchy.triangles.length; ++i) {
+                                triangles.push(hierarchy.triangles[i]);
+                            }
+
+                            clusterRenderer.newMesh({
+                                indices,
+                                vertices,
+                                errors: hierarchy.errors,
+                                bounds: hierarchy.bounds,
+                                clusters: hierarchy.clusters,
+                                meshletVertices: hierarchy.vertices,
+                                meshletTriangles: new Uint32Array(triangles),
+                                numMeshlets: hierarchy.clusters.length / 4,
+                            });
+
+                            transform = trans;
+                        });
+                    }
+                }
+            }, false);
+        });
+
+        const params = makeUi(clusterRenderer.numLods);
+
+        let lastTime = new Date();
+        let frameId = 0;
+        const render = () => {
+            const now = new Date();
+            const dt = (now - lastTime);
+            lastTime = now;
+
+            ++frameId;
+
+            if (resizeInProgress) {
+                setTimeout(render, 250);
+                return;
+            }
+
+            cameraController.update(dt);
+
+            const cameraView = cameraController.view;
+            clusterRenderer.update(
+                {
+                    view: cameraView,
+                    projection: resolutionDependentStuff.projection,
+                    position: cameraController.position,
+                },
+                {instances: [transform]},
+                {...resolutionDependentStuff.errorProjectionParams, threshold: params.renderSettings.errorThreshold},
+                params.renderSettings.updateCullingCamera,
+            );
+
+            const encoder = device.createCommandEncoder();
+
+            if (params.renderSettings.drawDirect) {
+                const geometryPass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: resolutionDependentStuff.backBufferView,
+                        clearValue: [0, 0, 0, 1],
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    }],
+                    depthStencilAttachment: {
+                        view: resolutionDependentStuff.depthBufferView,
+                        depthClearValue: 0.0, // reverse z
+                        depthLoadOp: 'clear',
+                        depthStoreOp: 'store',
+                    },
+                });
+                clusterRenderer.encode(geometryPass, params.renderSettings.lod);
+                geometryPass.end();
+            } else {
+                clusterRenderer.encodeIndirect(
+                    encoder,
+                    resolutionDependentStuff.backBufferView,
+                    resolutionDependentStuff.depthBufferView,
+                );
+            }
+
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    clearValue: [0, 0, 0, 1],
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+            });
+            pass.setPipeline(presentPipeline);
+            pass.setBindGroup(0, resolutionDependentStuff.presentBindGroup);
+            pass.draw(3);
+            pass.end();
+
+            device.queue.submit([encoder.finish()]);
+
+            requestAnimationFrame(render);
+        };
+        render();
+    }
+
+    Promise.all([assimpjs(), trichijs()])
+        .then(main);
+</script>
+</body>
+</html>

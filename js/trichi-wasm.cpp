@@ -4,12 +4,11 @@
 #include "trichi.hpp"
 
 [[nodiscard]] emscripten::val buildTriangleClusterHierarchy(const emscripten::val& indicesJs, const emscripten::val& verticesJs, const size_t vertexStride, const trichi::TriChiParams& params) {
-  const auto indices = emscripten::convertJSArrayToNumberVector<uint32_t>(indicesJs);
-  const auto vertices = emscripten::convertJSArrayToNumberVector<float>(vertices);
-
-  const auto hierarchy = trichi::build_cluster_hierarchy(indices, vertices, vertexStride, params);
-
-  emscripten::val view{ emscripten::typed_memory_view(hierarchy.errors.size() * 10, hierarchy.errors.data()) };
+  const auto hierarchy = trichi::build_cluster_hierarchy(
+      emscripten::convertJSArrayToNumberVector<uint32_t>(indicesJs),
+      emscripten::convertJSArrayToNumberVector<float>(verticesJs),
+      vertexStride,
+      params);
 
   auto errors = emscripten::val::global("Float32Array").new_(hierarchy.errors.size() * 10);
   for (size_t i = 0; i < hierarchy.errors.size(); ++i) {
@@ -25,10 +24,40 @@
     errors.set(i * 10 + 9, hierarchy.errors[i].cluster_error.error);
   }
 
-  // todo: nodes, root nodes, bounds, clusters, vertices, triangles
+  auto bounds = emscripten::val::global("Float32Array").new_(hierarchy.bounds.size() * 4);
+  for (size_t i = 0; i < hierarchy.bounds.size(); ++i) {
+    bounds.set(i * 4 + 0, hierarchy.bounds[i].center[0]);
+    bounds.set(i * 4 + 1, hierarchy.bounds[i].center[1]);
+    bounds.set(i * 4 + 2, hierarchy.bounds[i].center[2]);
+    bounds.set(i * 4 + 3, hierarchy.bounds[i].radius);
+  }
+
+  auto clusters = emscripten::val::global("Uint32Array").new_(hierarchy.clusters.size() * 4);
+  for (size_t i = 0; i < hierarchy.clusters.size(); ++i) {
+    clusters.set(i * 4 + 0, hierarchy.clusters[i].vertex_offset);
+    clusters.set(i * 4 + 1, hierarchy.clusters[i].triangle_offset);
+    clusters.set(i * 4 + 2, hierarchy.clusters[i].vertex_count);
+    clusters.set(i * 4 + 3, hierarchy.clusters[i].triangle_count);
+  }
+
+  auto vertices = emscripten::val::global("Uint32Array").new_(hierarchy.vertices.size());
+  for (size_t i = 0; i < hierarchy.vertices.size(); ++i) {
+    vertices.set(i, hierarchy.vertices[i]);
+  }
+
+  auto triangles = emscripten::val::global("Uint8Array").new_(hierarchy.triangles.size());
+  for (size_t i = 0; i < hierarchy.triangles.size(); ++i) {
+    triangles.set(i, hierarchy.triangles[i]);
+  }
+
+  // todo: nodes & root nodes
 
   emscripten::val result = emscripten::val::object();
   result.set("errors", errors);
+  result.set("bounds", bounds);
+  result.set("clusters", clusters);
+  result.set("vertices", vertices);
+  result.set("triangles", triangles);
 
   return result;
 }

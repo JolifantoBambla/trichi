@@ -8,8 +8,8 @@ project(trichi
 
 set(CMAKE_CXX_STANDARD 20)
 
-option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
-option(TRICHI_BUILD_CLI "Build cli" ON)
+option(TRICHI_PARALLEL "Build the library with parallelization enabled." OFF)
+option(TRICHI_BUILD_CLI "Build cli" OFF)
 
 # add dependencies
 include(cmake/CPM.cmake)
@@ -32,6 +32,10 @@ target_link_libraries(trichi
         meshoptimizer
         libmetis
 )
+
+if (EMSCRIPTEN)
+    add_subdirectory(js)
+endif (EMSCRIPTEN)
 
 if (TRICHI_PARALLEL)
     target_link_libraries(trichi BS_thread_pool)
