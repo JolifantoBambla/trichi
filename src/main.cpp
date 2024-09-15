@@ -60,6 +60,7 @@ int main(int argc, char* argv[]) {
 
     trichi::TriChiParams params{};
     params.thread_pool_size = std::thread::hardware_concurrency();
+    params.cluster_cone_weight = 0.0;
     const auto dag = trichi::build_cluster_hierarchy(indices, vertices, vertex_stride, params);
 
 
