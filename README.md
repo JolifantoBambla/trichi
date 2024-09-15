@@ -1,11 +1,11 @@
 # Tri Chi: Triangle ClusterIndex Hierarchy (WIP)
 
+**This library is still in development. The API is not yet stable and the implementation is neither optimized for runtime performance nor quality, nor does it handle all edge cases.
+If you want to help change that, you are more than welcome to submit a PR :)**
+
 A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
 Note that this library only preprocesses triangle meshes but provides no rendering solution. Check out the [WebGPU demo](https://jolifantobambla.github.io/trichi/) to see what a very naive renderer for such cluster hierarchies could look like.
-
-**This library is still in development. The API is not yet stable and the implementation is neither optimized for runtime performance nor quality, nor does it handle all edge cases.
-If you want to help change that, you are more than welcome to submit a PR :)**
 
 ## Getting Started
 
