@@ -34,7 +34,7 @@ const auto clusterHierarchy = trichi::build_cluster_hierarchy(/* ... */);
 
  - [meshoptimizer](https://github.com/zeux/meshoptimizer): used for triangle clustering and mesh simplification, MIT licensed
  - [METIS](https://github.com/KarypisLab/METIS): used for grouping neighboring triangle clusters, Apache 2.0 licensed
- - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with multithreading option): used for parallelizing some dag construction steps, MIT licensed
+ - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with the `TRICHI_PARALLEL` option): used for parallelizing some dag construction steps, MIT licensed
 
 ## Caveats
 
