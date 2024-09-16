@@ -47,6 +47,12 @@ export class FPSCameraController {
         this.#yaw = ((this.#yaw % tau) + tau) % tau;
     }
 
+    reset({position = [0, 0, 10], pitch = 0.0, yaw = 0.0}) {
+        this.#position = position;
+        this.#pitch = pitch;
+        this.#yaw = yaw;
+    }
+
     update(dt = 0.0) {
         const keyFront = 'KeyW';
         const keyBack = 'KeyS';

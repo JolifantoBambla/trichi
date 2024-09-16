@@ -16,7 +16,7 @@ struct ErrorProjectionParams {
     resolution: f32,
     z_near: f32,
     threshold: f32,
-    pad: f32,
+    radius_scale: f32,
 }
 
 struct Instance {
@@ -75,7 +75,7 @@ fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
     if bounds.error == 0.0 || bounds.error == f32_max {
         return bounds.error;
     }
-    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - bounds.radius;
+    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - (bounds.radius * error_projection_params.radius_scale);
     if dist < error_projection_params.z_near {
         dist = error_projection_params.z_near;
     }
@@ -129,12 +129,13 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
 
     // frustum culling
     let center = (transform * vec4(bounds.center, 1.0)).xyz;
+    let radius = bounds.radius * error_projection_params.radius_scale;
     var visible =
-        (dot(vec4(center, 1.0), camera.frustum[0]) + bounds.radius >= 0.0) &&
-        (dot(vec4(center, 1.0), camera.frustum[1]) + bounds.radius >= 0.0) &&
-        (dot(vec4(center, 1.0), camera.frustum[2]) + bounds.radius >= 0.0) &&
-        (dot(vec4(center, 1.0), camera.frustum[3]) + bounds.radius >= 0.0) &&
-        (dot(vec4(center, 1.0), camera.frustum[4]) + bounds.radius >= 0.0);
+        (dot(vec4(center, 1.0), camera.frustum[0]) + radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[1]) + radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[2]) + radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[3]) + radius >= 0.0) &&
+        (dot(vec4(center, 1.0), camera.frustum[4]) + radius >= 0.0);
     if !visible {
         return;
     }

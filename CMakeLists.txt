@@ -8,8 +8,8 @@ project(trichi
 
 set(CMAKE_CXX_STANDARD 20)
 
-option(TRICHI_PARALLEL "Build the library with parallelization enabled." OFF)
-option(TRICHI_BUILD_CLI "Build cli" OFF)
+option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
+option(TRICHI_BUILD_CLI "Build cli" ON)
 
 # add dependencies
 include(cmake/CPM.cmake)

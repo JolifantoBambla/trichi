@@ -34,7 +34,7 @@ jobs:
         with:
           lfs: 'true'
       - name: Populate model
-        run: git lfs pull
+        run: cd demo && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
