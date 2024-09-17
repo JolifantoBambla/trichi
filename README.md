@@ -5,7 +5,7 @@ If you want to help change that, you are more than welcome to submit a PR :)**
 
 A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
-Note that this library only preprocesses triangle meshes but provides no rendering solution. Check out the [WebGPU demo](https://jolifantobambla.github.io/trichi/) to see what a very naive renderer for such cluster hierarchies could look like.
+Note that this library only preprocesses triangle meshes but provides no rendering solution. Check out the [WebGPU demo](https://jolifantobambla.github.io/trichi/) (**takes its sweet time to load!**) to see what a very naive renderer for such cluster hierarchies could look like.
 
 ## Getting Started
 
@@ -26,7 +26,20 @@ target_link_libraries(${YOUR_TARGET} trichi)
 ```cpp
 #include "trichi.hpp"
 
-const auto clusterHierarchy = trichi::build_cluster_hierarchy(/* ... */);
+const std::vector<uint32_t> indices = /* triangle indices */
+const std::vector<float> vertices = /* the first three floats of a vertex should be its 3d position */
+const auto clusterHierarchy = trichi::buildClusterHierarchy(
+  indices,
+  vertices,
+  vertexStrideInBytes,
+  trichi::Params {
+    .maxVerticesPerCluster: 64,
+    .maxTrianglesPerCluster: 128,
+    .clusterConeWeight: 0.0,
+    .targetClustersPerGroup: 4,
+    .maxHierarchyDepth: 25,
+    .threadPoolSize: std::thread::hardware_concurrency(),
+  });
 ```
 
 
