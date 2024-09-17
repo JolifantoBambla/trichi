@@ -61,7 +61,7 @@
   return result;
 }
 
-[[nodiscard]] emscripten::val buildTriangleClusterHierarchy(const emscripten::val& indicesJs, const emscripten::val& verticesJs, const size_t vertexStride, const trichi::TriChiParams& params) {
+[[nodiscard]] emscripten::val buildTriangleClusterHierarchy(const emscripten::val& indicesJs, const emscripten::val& verticesJs, const size_t vertexStride, const trichi::Params& params) {
   return convertToJsObjec(trichi::buildClusterHierarchy(
       emscripten::convertJSArrayToNumberVector<uint32_t>(indicesJs),
       emscripten::convertJSArrayToNumberVector<float>(verticesJs),
@@ -69,7 +69,7 @@
       params));
 }
 
-[[nodiscard]] emscripten::val buildTriangleClusterHierarchyFromFileBlob(const std::string& fileName, const emscripten::val& bytesJs, const trichi::TriChiParams& params) {
+[[nodiscard]] emscripten::val buildTriangleClusterHierarchyFromFileBlob(const std::string& fileName, const emscripten::val& bytesJs, const trichi::Params& params) {
   const size_t floatsPerVertex = 3;
   const size_t vertexStride = floatsPerVertex * sizeof(float);
   std::vector<float> vertices{};

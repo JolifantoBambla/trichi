@@ -10,7 +10,7 @@ sudo apt-get install emscripten
 
 ```
 mkdir build && cd build
-cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_PARALLEL=OFF -DTRICHI_BUILD_CLI=OFF -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
+cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_BUILD_CLI=OFF -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
 cmake --build . --target trichi-wasm
 ```
 
@@ -31,7 +31,6 @@ new TrichiJs().then(trichi => {
             targetClustersPerGroup: 4,
             maxHierarchyDepth: 25,
             threadPoolSize: 1,
-            storeHierarchy: false,
         }
     );
     // do something with cluster hierarchy
