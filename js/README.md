@@ -31,7 +31,6 @@ new TrichiJs().then(trichi => {
             targetClustersPerGroup: 4,
             maxHierarchyDepth: 25,
             threadPoolSize: 1,
-            storeHierarchy: false,
         }
     );
     // do something with cluster hierarchy
