@@ -67,7 +67,9 @@ The algorithm builds on the assumption that the input mesh is contiguous. It is 
 ## Further Reading
 
  - [Karis et al., "A Deep Dive into Nanite Virtualized Geometry"](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)
+ - [Ponchio, "Multiresolution structures for interactive visualization of very large 3D datasets"](https://vcg.isti.cnr.it/~ponchio/download/ponchio_phd.pdf)
  - [Cignoni et al., "Batched Multi Triangulation"](https://ieeexplore.ieee.org/document/1532797)
  - [Yoon et al., "Quick-VDR: out-of-core view-dependent rendering of gigantic models"](https://ieeexplore.ieee.org/document/1432683)
+ - [Benthin and Peters, "Real-Time Ray Tracing of Micro-Poly Geometry with Hierarchical Level of Detail"](https://onlinelibrary.wiley.com/doi/10.1111/cgf.14868)
  - [Cao, "Seamless Rendering on Mobile: The Magic of Adaptive LOD Pipeline"](https://advances.realtimerendering.com/s2024/content/Cao-NanoMesh/AdavanceRealtimeRendering_NanoMesh0810.pdf)
  - [jglrxavpok, "Recreating Nanite"](https://jglrxavpok.github.io/2023/11/12/recreating-nanite-the-plan.html)
