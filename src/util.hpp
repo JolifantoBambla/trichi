@@ -14,23 +14,23 @@
 #endif //TRICHI_PARALLEL
 
 namespace trichi {
-[[nodiscard]] constexpr uint64_t pack_sorted(uint32_t a, uint32_t b) {
+[[nodiscard]] constexpr uint64_t packSorted(const uint32_t a, const uint32_t b) {
   return (static_cast<uint64_t>(std::min(a, b)) << 32) | std::max(a, b);
 }
 
 class LoopRunner {
  public:
-  explicit LoopRunner(size_t thread_count)
+  explicit LoopRunner(const size_t threadCount)
 #ifdef TRICHI_PARALLEL
-      : thread_pool(thread_count)
+      : threadPool(threadCount)
 #endif //TRICHI_PARALLEL
   {}
 
   template<typename Body>
-  void loop(size_t start, size_t end, Body&& body) {
+  void loop(const size_t start, const size_t end, Body&& body) {
 #ifdef TRICHI_PARALLEL
-    thread_pool.detach_loop<size_t>(start, end, body);
-    thread_pool.wait();
+    threadPool.detach_loop<size_t>(start, end, body);
+    threadPool.wait();
 #else
     for (size_t i = start; i < end; ++i) {
       body(i);
@@ -39,7 +39,7 @@ class LoopRunner {
   }
  private:
 #ifdef TRICHI_PARALLEL
-  BS::thread_pool thread_pool;
+  BS::thread_pool threadPool;
 #endif //TRICHI_PARALLEL
 };
 
@@ -56,7 +56,7 @@ struct Counter {
 };
 
 template <typename T1, typename T2>
-size_t intersection_size(const T1& s1, const T2& s2) {
+size_t intersectionSize(const T1& s1, const T2& s2) {
   Counter c{};
   std::set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(c));
   return c.count;

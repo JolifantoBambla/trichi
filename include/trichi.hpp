@@ -13,45 +13,40 @@ namespace trichi {
 /**
  * Tuning parameters for building a triangle cluster hierarchy.
  */
-struct TriChiParams {
+struct Params {
   /**
    * The maximum number of vertices per cluster.
    */
-  size_t max_vertices_per_cluster = 64;
+  size_t maxVerticesPerCluster = 64;
 
   /**
    * The maximum number of triangles per cluster.
    */
-  size_t max_triangles_per_cluster = 128;
+  size_t maxTrianglesPerCluster = 128;
 
   /**
    * A weighting factor for the importance of cluster normal cones used when building the clusters.
    * In range [0..1].
    */
-  float cluster_cone_weight = 0.5;
+  float clusterConeWeight = 0.5;
 
   /**
    * The target number of clusters per group.
    */
-  size_t target_clusters_per_group = 4;
+  size_t targetClustersPerGroup = 4;
 
   /**
    * The maximum number of iterations when building the hierarchy.
    * In each iteration, the number of triangles is approximately halved.
    */
-  size_t max_hierarchy_depth = 25;
+  size_t maxHierarchyDepth = 25;
 
   /**
    * The size of the thread pool used for parallelizing DAG building steps.
    * If `trichi` is not built with multithreading enabled, this is ignored.
    * If this is 0, defaults to 1.
    */
-  size_t thread_pool_size = 1;
-
-  /**
-   * If this is false, the `nodes` and `root_nodes` members of the returned `ClusterHierarchy` will be empty.
-   */
-  bool store_hierarchy = true;
+  size_t threadPoolSize = 1;
 };
 
 /**
@@ -108,12 +103,12 @@ struct NodeErrorBounds {
   /**
    * The parent group's conservative error bounds.
    */
-  ErrorBounds parent_error{};
+  ErrorBounds parentError{};
 
   /**
    * The cluster's error bounds.
    */
-  ErrorBounds cluster_error{};
+  ErrorBounds clusterError{};
 };
 
 struct ClusterBounds {
@@ -130,7 +125,7 @@ struct ClusterBounds {
   /**
    * The cluster's normal cone.
    */
-  NormalCone normal_cone{};
+  NormalCone normalCone{};
 };
 
 /**
@@ -142,12 +137,12 @@ struct Node {
   /**
    * The index of the node's corresponding cluster.
    */
-  size_t cluster_index = 0;
+  size_t clusterIndex = 0;
 
   /**
    * The indices of the node's children.
    */
-  std::vector<size_t> child_node_indices{};
+  std::vector<size_t> childNodeIndices{};
 };
 
 /**
@@ -159,22 +154,22 @@ struct Cluster {
   /**
    * The cluster's offset in the array of vertex indices.
    */
-  unsigned int vertex_offset = 0;
+  unsigned int vertexOffset = 0;
 
   /**
    * The cluster's offset in the array of triangles.
    */
-  unsigned int triangle_offset = 0;
+  unsigned int triangleOffset = 0;
 
   /**
    * The number of vertex indices used by the cluster.
    */
-  unsigned int vertex_count = 0;
+  unsigned int vertexCount = 0;
 
   /**
    * The number of triangles in the cluster.
    */
-  unsigned int triangle_count = 0;
+  unsigned int triangleCount = 0;
 };
 
 /**
@@ -199,7 +194,7 @@ struct ClusterHierarchy {
    * Ideally this contains only one element.
    * However, if the maximum hierarchy depth was reached before all clusters could be reduced to a single cluster, there will be multiple root nodes.
    */
-  std::vector<size_t> root_nodes{};
+  std::vector<size_t> rootNodes{};
 
   /**
    * Error bounds of clusters.
@@ -233,9 +228,6 @@ struct ClusterHierarchy {
    *    vertices[c.triangle_offset], vertices[c.triangle_offset + c.triangle_count * 3]
    */
   std::vector<uint8_t> triangles{};
-
-  // todo: remove
-  std::vector<std::size_t> lod_offsets{};
 };
 
 /**
@@ -246,11 +238,11 @@ struct ClusterHierarchy {
  *
  * @param indices the input meshes vertex indices
  * @param vertices the input meshes vertices - the first 3 floats of a vertex are expected to store the position.
- * @param vertex_stride the size of each vertex in the vertices array
+ * @param vertexStride the size of each vertex in the vertices array
  * @param params tuning parameters for building the cluster hierarchy
  * @return Returns the triangle cluster hierarchy built for the input mesh.
  */
-[[nodiscard]] ClusterHierarchy build_cluster_hierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertex_stride, const TriChiParams& params = {});
+[[nodiscard]] ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, size_t vertexStride, const Params& params = {});
 }
 
 #endif  //TRICHI_HPP

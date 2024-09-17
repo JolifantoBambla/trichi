@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: MIT
 */
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -16,14 +17,20 @@
 #include "trichi.hpp"
 
 int main(int argc, char* argv[]) {
-  argparse::ArgumentParser program("per_meshlet_nuances");
-  program.add_description("Create a meshlet hierarchy.");
+  argparse::ArgumentParser program("example");
+  program.add_description("Creates clusters hierarchies and dump them as JS files.");
 
   program.add_argument("-f", "--files")
-      .help("a list of .OBJ files")
+      .help("a list of model files (e.g., OBJ files)")
       .append()
       .nargs(argparse::nargs_pattern::at_least_one)
       .default_value(std::vector<std::string>{});
+
+  program.add_argument("-o", "--outputdir")
+    .help("the output directory")
+    .append()
+    .nargs(argparse::nargs_pattern::at_least_one)
+    .default_value(std::vector<std::string>{});
 
   try {
     program.parse_args(argc, argv);
@@ -32,10 +39,9 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  auto files = program.get<std::vector<std::string>>("--files");
-  for (const auto& f : files) {
-    const size_t floats_per_vertex = 3;  //(3 * 4);
-    const size_t vertex_stride = floats_per_vertex * sizeof(float);
+  const std::filesystem::path output_dir = program.get<std::string>("-o");
+  for (auto files = program.get<std::vector<std::string>>("--files"); const auto& f : files) {
+    constexpr size_t vertexStride = 3 * sizeof(float);
     std::vector<float> vertices{};
     std::vector<uint32_t> indices{};
     {
@@ -58,18 +64,17 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    trichi::TriChiParams params{};
-    params.thread_pool_size = std::thread::hardware_concurrency();
-    params.cluster_cone_weight = 0.0;
-    const auto dag = trichi::build_cluster_hierarchy(indices, vertices, vertex_stride, params);
+    trichi::Params params{};
+    params.threadPoolSize = std::thread::hardware_concurrency();
+    params.clusterConeWeight = 0.0;
+    const auto dag = trichi::buildClusterHierarchy(indices, vertices, vertexStride, params);
 
-
-    float aabb_min[3] = {
+    float aabbMin[3] = {
         std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-    float aabb_max[3] = {
+    float aabbMax[3] = {
         std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min()};
 
-    std::ofstream js_stream("/home/lukas/Projects/trichi/demo/demo-mesh.js");
+    std::ofstream js_stream(output_dir / (f + ".js"));
     js_stream << "export const mesh = {\n";
     js_stream << "  vertices: new Float32Array([";
     for (size_t i = 0; i < vertices.size(); ++i) {
@@ -79,21 +84,21 @@ int main(int argc, char* argv[]) {
       }
       if (i % 3 == 0) {
         for (size_t c = 0; c < 3; ++c) {
-          aabb_min[c] = std::min(aabb_min[c], vertices[i + c]);
-          aabb_max[c] = std::max(aabb_max[c], vertices[i + c]);
+          aabbMin[c] = std::min(aabbMin[c], vertices[i + c]);
+          aabbMax[c] = std::max(aabbMax[c], vertices[i + c]);
         }
       }
     }
     js_stream << "]),\n";
 
-    js_stream << "  strideFloats: " << vertex_stride / sizeof(float) << ",\n";
+    js_stream << "  strideFloats: " << vertexStride / sizeof(float) << ",\n";
 
     js_stream << "  clusters: new Uint32Array([";
     for (size_t i = 0; i < dag.clusters.size(); ++i) {
-      js_stream << dag.clusters[i].vertex_offset << ",";
-      js_stream << dag.clusters[i].triangle_offset << ",";
-      js_stream << dag.clusters[i].vertex_count << ",";
-      js_stream << dag.clusters[i].triangle_count;
+      js_stream << dag.clusters[i].vertexOffset << ",";
+      js_stream << dag.clusters[i].triangleOffset << ",";
+      js_stream << dag.clusters[i].vertexCount << ",";
+      js_stream << dag.clusters[i].triangleCount;
       if (i != dag.clusters.size() - 1) {
         js_stream << ",";
       }
@@ -118,31 +123,22 @@ int main(int argc, char* argv[]) {
     }
     js_stream << "]),\n";
 
-    js_stream << "  lods: new Uint32Array([";
-    for (size_t i = 0; i < dag.lod_offsets.size(); ++i) {
-      js_stream << dag.lod_offsets[i];
-      if (i != dag.lod_offsets.size() - 1) {
-        js_stream << ",";
-      }
-    }
-    js_stream << "]),\n";
-
     js_stream << "  numMeshlets: " << dag.clusters.size() << ",\n";
 
-    js_stream << "  maxClusterTriangles: " << params.max_triangles_per_cluster << ",\n";
+    js_stream << "  maxClusterTriangles: " << params.maxTrianglesPerCluster << ",\n";
 
-    js_stream << "  aabb: {min: new Float32Array([" << aabb_min[0] << "," << aabb_min[1] << "," << aabb_min[2]
-              << "]), max: new Float32Array([" << aabb_max[0] << "," << aabb_max[1] << "," << aabb_max[2] << "])},\n";
+    js_stream << "  aabb: {min: new Float32Array([" << aabbMin[0] << "," << aabbMin[1] << "," << aabbMin[2]
+              << "]), max: new Float32Array([" << aabbMax[0] << "," << aabbMax[1] << "," << aabbMax[2] << "])},\n";
 
     js_stream << "  errors: new Float32Array([";
     for (size_t i = 0; i < dag.errors.size(); ++i) {
       const auto& node = dag.errors[i];
-      js_stream << node.parent_error.center[0] << "," << node.parent_error.center[1] << "," << node.parent_error.center[2] << ",";
-      js_stream << node.parent_error.radius << ",";
-      js_stream << node.parent_error.error << ",";
-      js_stream << node.cluster_error.center[0] << "," << node.cluster_error.center[1] << "," << node.cluster_error.center[2] << ",";
-      js_stream << node.cluster_error.radius << ",";
-      js_stream << node.cluster_error.error;
+      js_stream << node.parentError.center[0] << "," << node.parentError.center[1] << "," << node.parentError.center[2] << ",";
+      js_stream << node.parentError.radius << ",";
+      js_stream << node.parentError.error << ",";
+      js_stream << node.clusterError.center[0] << "," << node.clusterError.center[1] << "," << node.clusterError.center[2] << ",";
+      js_stream << node.clusterError.radius << ",";
+      js_stream << node.clusterError.error;
       if (i < dag.errors.size() - 1) {
         js_stream << ",";
       }

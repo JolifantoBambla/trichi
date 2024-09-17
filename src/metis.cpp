@@ -16,80 +16,80 @@ struct Graph {
   std::vector<idx_t> xadj;
   std::vector<idx_t> adjacency;
   std::vector<idx_t> adjwght;
-  bool is_contiguous;
+  bool isContiguous;
 };
 
-[[nodiscard]] Graph build_cluster_graph(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lods, LoopRunner& loop_runner) {
-  const auto boundaries = extract_boundaries(clusters, lods, loop_runner);
+[[nodiscard]] Graph buildClusterGraph(const std::vector<ClusterIndex>& clusterIndices, const Buffers& buffers, LoopRunner& loopRunner) {
+  const auto boundaries = extractBoundaries(clusterIndices, buffers, loopRunner);
 
-  std::atomic<size_t> adjacency_size = 0;
+  std::atomic<size_t> adjacencySize = 0;
 
-  std::vector<idx_t> valence_forward( clusters.size(), 0);
-  std::vector<std::vector<idx_t>> adjacency_forward{clusters.size()};
-  std::vector<std::vector<idx_t>> adjwght_forward{clusters.size()};
+  std::vector<idx_t> valenceForward( clusterIndices.size(), 0);
+  std::vector<std::vector<idx_t>> adjacencyForward{clusterIndices.size()};
+  std::vector<std::vector<idx_t>> adjwghtForward{clusterIndices.size()};
 
   // forward pass on adjacency edge weights - this is expensive, so we do this in parallel
   // (doing a parallel forward and a sequential resolve pass is ~5s faster for 4m tris than doing a parallel bidirectional pass on my machine)
-  loop_runner.loop(0, boundaries.size(), [&](size_t i) {
+  loopRunner.loop(0, boundaries.size(), [&](const size_t i) {
     const auto& boundary = boundaries[i];
     // loop over vertices that have not been processed yet
     for (size_t j = i + 1; j < boundaries.size(); ++j) {
-      if (const auto shared_boundary_length = intersection_size(boundary, boundaries[j]); shared_boundary_length > 0) {
-        ++valence_forward[i];
-        adjacency_forward[i].push_back(static_cast<idx_t>(j));
-        adjwght_forward[i].push_back(static_cast<idx_t>(shared_boundary_length));
+      if (const auto sharedBoundaryLength = intersectionSize(boundary, boundaries[j]); sharedBoundaryLength > 0) {
+        ++valenceForward[i];
+        adjacencyForward[i].push_back(static_cast<idx_t>(j));
+        adjwghtForward[i].push_back(static_cast<idx_t>(sharedBoundaryLength));
       }
     }
-    adjacency_size += adjacency_forward[i].size() * 2;
+    adjacencySize += adjacencyForward[i].size() * 2;
   });
 
-  bool is_contiguous = true;
+  bool isContiguous = true;
 
   // stores the resolved adjacency_forward & edge weights
-  std::vector<idx_t> xadj( clusters.size() + 1, 0);
+  std::vector<idx_t> xadj( clusterIndices.size() + 1, 0);
   std::vector<idx_t> adjacency{};
   std::vector<idx_t> adjwght{};
-  adjacency.reserve(adjacency_size);
-  adjwght.reserve(adjacency_size);
+  adjacency.reserve(adjacencySize);
+  adjwght.reserve(adjacencySize);
 
   // temp vectors to store adjacency_forward & edge weights from earlier nodes (we need each edge in both directions)
-  std::vector<std::vector<idx_t>> adjacency_prev{clusters.size()};
-  std::vector<std::vector<idx_t>> adjwght_prev{clusters.size()};
+  std::vector<std::vector<idx_t>> adjacencyPrev{clusterIndices.size()};
+  std::vector<std::vector<idx_t>> adjwghtPrev{clusterIndices.size()};
 
   // resolve adjacency_forward & edge weights
   for (size_t i = 0; i < boundaries.size(); ++i) {
-    const idx_t valence = valence_forward[i] + static_cast<idx_t>(adjacency_prev[i].size());
+    const idx_t valence = valenceForward[i] + static_cast<idx_t>(adjacencyPrev[i].size());
     if (valence == 0) {
-      is_contiguous = false;
+      isContiguous = false;
     }
     xadj[i + 1] += valence + xadj[i];
-    for (size_t j = 0; j < adjacency_forward[i].size(); ++j) {
-      adjacency_prev[adjacency_forward[i][j]].push_back(static_cast<idx_t>(i));
-      adjwght_prev[adjacency_forward[i][j]].push_back(adjwght_forward[i][j]);
+    for (size_t j = 0; j < adjacencyForward[i].size(); ++j) {
+      adjacencyPrev[adjacencyForward[i][j]].push_back(static_cast<idx_t>(i));
+      adjwghtPrev[adjacencyForward[i][j]].push_back(adjwghtForward[i][j]);
     }
-    adjacency.insert(adjacency.cend(), adjacency_prev[i].cbegin(), adjacency_prev[i].cend());
-    adjwght.insert(adjwght.cend(), adjwght_prev[i].cbegin(), adjwght_prev[i].cend());
-    adjacency.insert(adjacency.cend(), adjacency_forward[i].cbegin(), adjacency_forward[i].cend());
-    adjwght.insert(adjwght.cend(), adjwght_forward[i].cbegin(), adjwght_forward[i].cend());
+    adjacency.insert(adjacency.cend(), adjacencyPrev[i].cbegin(), adjacencyPrev[i].cend());
+    adjwght.insert(adjwght.cend(), adjwghtPrev[i].cbegin(), adjwghtPrev[i].cend());
+    adjacency.insert(adjacency.cend(), adjacencyForward[i].cbegin(), adjacencyForward[i].cend());
+    adjwght.insert(adjwght.cend(), adjwghtForward[i].cbegin(), adjwghtForward[i].cend());
   }
 
   return Graph{
       .xadj = std::move(xadj),
       .adjacency = std::move(adjacency),
       .adjwght = std::move(adjwght),
-      .is_contiguous = is_contiguous,
+      .isContiguous = isContiguous,
   };
 }
 
-[[nodiscard]] std::vector<std::vector<size_t>> resolve_groups(const std::vector<idx_t>& partition, size_t num_groups) {
-  auto groups = std::vector<std::vector<size_t>>(num_groups);
+[[nodiscard]] std::vector<std::vector<size_t>> resolveGroups(const std::vector<idx_t>& partition, const size_t numGroups) {
+  auto groups = std::vector<std::vector<size_t>>(numGroups);
   for (size_t i = 0; i < partition.size(); ++i) {
     groups[partition[i]].push_back(i);
   }
   return std::move(groups);
 }
 
-[[nodiscard]] std::array<idx_t, METIS_NOPTIONS> createPartitionOptions(bool is_contiguous = true) {
+[[nodiscard]] std::array<idx_t, METIS_NOPTIONS> createPartitionOptions(const bool isContiguous = true) {
   std::array<idx_t, METIS_NOPTIONS> options{};
   METIS_SetDefaultOptions(options.data());
   options[METIS_OPTION_OBJTYPE] =
@@ -107,7 +107,7 @@ struct Graph {
   options[METIS_OPTION_NITER] = 10;  // number of refinement steps at each coarsening step
   //options[METIS_OPTION_UFACTOR] = 0; // default for rb = 1, kway = 30
   //options[METIS_OPTION_MINCONN] = 0; // 1 -> explicitly minimize connectivity between groups
-  options[METIS_OPTION_CONTIG] = idx_t(is_contiguous);  // 1 -> force contiguous partitions
+  options[METIS_OPTION_CONTIG] = idx_t(isContiguous);  // 1 -> force contiguous partitions
   //options[METIS_OPTION_SEED] = 0; // seed for rng
   options[METIS_OPTION_NUMBERING] = 0;  // 0 -> result is 0-indexed
 #ifndef NDEBUG
@@ -118,13 +118,13 @@ struct Graph {
 }
 
 // todo: mt-kahypar (https://github.com/kahypar/mt-kahypar) looks very promising for graph partitioning - no static lib though, so needs some work for wasm build
-[[nodiscard]] std::vector<std::vector<size_t>> partition_graph(Graph graph, size_t max_clusters_per_group) {
+[[nodiscard]] std::vector<std::vector<size_t>> partitionGraph(Graph graph, const size_t maxClustersPerGroup) {
   auto numVertices = static_cast<idx_t>(graph.xadj.size() - 1);
   idx_t numConstraints = 1;  // 1 is the minimum allowed value
-  idx_t numParts = std::max(numVertices / static_cast<idx_t>(max_clusters_per_group), 2);
+  idx_t numParts = std::max(numVertices / static_cast<idx_t>(maxClustersPerGroup), 2);
   idx_t edgeCut = 0;
   std::vector<idx_t> partition = std::vector<idx_t>(numVertices, 0);
-  std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions(graph.is_contiguous);
+  std::array<idx_t, METIS_NOPTIONS> options = createPartitionOptions(graph.isContiguous);
 
   const auto partitionResult = METIS_PartGraphKway(
       &numVertices,            // number of vertices
@@ -152,16 +152,16 @@ struct Graph {
     }
   }
 
-  return resolve_groups(partition, numParts);
+  return resolveGroups(partition, numParts);
 }
 
-[[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
-    const std::vector<ClusterIndex>& clusters,
-    const MeshletsBuffers& lods,
-    size_t max_clusters_per_group,
-    LoopRunner& loop_runner) {
-  return std::move(partition_graph(
-      std::move(build_cluster_graph(clusters, lods, loop_runner)),
-      max_clusters_per_group));
+[[nodiscard]] std::vector<std::vector<size_t>> groupClusters(
+    const std::vector<ClusterIndex>& clusterIndices,
+    const Buffers& buffers,
+    const size_t maxClustersPerGroup,
+    LoopRunner& loopRunner) {
+  return std::move(partitionGraph(
+      std::move(buildClusterGraph(clusterIndices, buffers, loopRunner)),
+      maxClustersPerGroup));
 }
 }  // namespace trichi

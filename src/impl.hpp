@@ -15,7 +15,7 @@
 #include "util.hpp"
 
 namespace trichi {
-struct MeshletsBuffers {
+struct Buffers {
   std::vector<Cluster> clusters;
   std::vector<unsigned int> vertices;
   std::vector<unsigned char> triangles;
@@ -26,19 +26,17 @@ struct ClusterIndex {
   size_t lod{};
 };
 
-[[nodiscard]] std::unordered_map<uint64_t, int> extract_cluster_edges(const ClusterIndex& cluster,
-                                                                      const MeshletsBuffers& lods);
+[[nodiscard]] std::unordered_map<uint64_t, int> extractClusterEdges(const ClusterIndex& clusterIndex, const Buffers& buffers);
 
-void extract_boundary(const ClusterIndex& cluster,
-                      const MeshletsBuffers& lods, std::vector<uint64_t>& boundary);
+void extractBoundary(const ClusterIndex& clusterIndex, const Buffers& buffers, std::vector<uint64_t>& boundary);
 
-[[nodiscard]] std::vector<std::vector<uint64_t>> extract_boundaries(const std::vector<ClusterIndex>& clusters, const MeshletsBuffers& lods, LoopRunner& loop_runner);
+[[nodiscard]] std::vector<std::vector<uint64_t>> extractBoundaries(const std::vector<ClusterIndex>& clusterIndices, const Buffers& buffers, LoopRunner& loopRunner);
 
-[[nodiscard]] std::vector<std::vector<size_t>> group_clusters(
-    const std::vector<ClusterIndex>& clusters,
-    const MeshletsBuffers& lods,
-    size_t max_clusters_per_group,
-    LoopRunner& loop_runner);
+[[nodiscard]] std::vector<std::vector<size_t>> groupClusters(
+    const std::vector<ClusterIndex>& clusterIndices,
+    const Buffers& buffers,
+    const size_t maxClustersPerGroup,
+    LoopRunner& loopRunner);
 }  // namespace trichi
 
 #endif  //TRICHI_IMPL_HPP
