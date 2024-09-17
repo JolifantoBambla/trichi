@@ -31,10 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          lfs: 'true'
       - name: Populate model
-        run: cd demo && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
+        run: cd demo && rm demo-mesh.js && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
