@@ -229,11 +229,17 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         size: Float32Array.BYTES_PER_ELEMENT * 16 * 2,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+    const renderSettingsBuffer = device.createBuffer({
+        lable: 'render settings',
+        size: Uint32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
     const uniformsBindGroup = device.createBindGroup({
         label: 'uniforms',
         layout: renderClustersPipeline.getBindGroupLayout(0),
         entries: [
             {binding: 0, resource: {buffer: cameraBuffer}},
+            {binding: 1, resource: {buffer: renderSettingsBuffer}},
         ],
     });
 
@@ -355,9 +361,10 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     let currentMesh = makeMeshBindgroups(initialMesh);
 
     return {
-        update({view, projection, position}, {instances}, {resolution, zNear, threshold, radiusScale}, updateCullingCamera = true) {
+        update({view, projection, position}, {instances}, {resolution, zNear, threshold, radiusScale}, {renderMode}, updateCullingCamera = true) {
             device.queue.writeBuffer(indirectDrawArgsBuffer, 0, new Uint32Array([0, 0, 0, 0]));
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
+            device.queue.writeBuffer(renderSettingsBuffer, 0, new Uint32Array([renderMode]));
             device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances.flat()]));
             device.queue.writeBuffer(cullingConfigBuffer, 0, new Float32Array([resolution, zNear, threshold, radiusScale]));
             if (updateCullingCamera) {

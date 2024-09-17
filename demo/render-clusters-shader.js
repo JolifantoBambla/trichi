@@ -6,6 +6,10 @@ struct Camera {
     projection: mat4x4<f32>,
 }
 
+struct Settings {
+    render_mode: u32,
+}
+
 struct Instance {
     model: mat4x4<f32>,
 }
@@ -28,6 +32,7 @@ struct Vertex {
 
 // per frame uniforms
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<uniform> settings: Settings;
 
 // mesh & instance pool
 @group(1) @binding(0) var<storage> instances: array<Instance>;
@@ -56,7 +61,16 @@ fn get_meshlet_color(index: u32) -> vec3<f32> {
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) @interpolate(flat) id: u32,
+}
+
+fn get_primitive_id(cluster_index: u32, vertex_index: u32) -> u32 {
+    if settings.render_mode == 0 {
+        return cluster_index;
+    } else {
+        let triangle_index = vertex_index / 3;
+        return (cluster_index << 7) | triangle_index;
+    }
 }
 
 @vertex
@@ -67,7 +81,7 @@ fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_
     if vertex_index >= (meshlet.triangle_count * 3) {
         return VertexOut(
             vec4<f32>(1.0, 1.0, 1.0, 0.0), // position will be clipped
-            vec3<f32>(),
+            0,
         );
     }
     
@@ -75,14 +89,14 @@ fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_
 
     let vertex = get_vertex(meshlet, vertex_index);
     return VertexOut(
-        camera.projection * camera.view * model * vec4(vertex.position, 1.0),
-        get_meshlet_color(cluster_instance.cluster_index),
+        camera.projection * camera.view * model * vec4(vertex.position, 1.0),        
+        get_primitive_id(cluster_instance.cluster_index, vertex_index),
     );
 }
 
 @fragment
 fn fragment(frag_in: VertexOut) -> @location(0) vec4<f32> {
-    let albedo = frag_in.color;
+    let albedo = get_meshlet_color(frag_in.id);
     return vec4(saturate(albedo), 1.0);
 }
 `;

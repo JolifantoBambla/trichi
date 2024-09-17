@@ -286,7 +286,7 @@
             }, false);
         });
 
-        const params = makeUi(clusterRenderer.numLods);
+        const params = makeUi();
 
         let lastTime = new Date();
         let frameId = 0;
@@ -317,35 +317,20 @@
                     threshold: params.renderSettings.errorThreshold,
                     radiusScale
                 },
+                {
+                    renderMode: params.renderSettings.renderMode === 'triangleId' ? 1 : 0,
+                },
                 params.renderSettings.updateCullingCamera,
             );
 
             const encoder = device.createCommandEncoder();
 
-            if (params.renderSettings.drawDirect) {
-                const geometryPass = encoder.beginRenderPass({
-                    colorAttachments: [{
-                        view: resolutionDependentStuff.backBufferView,
-                        clearValue: [0, 0, 0, 1],
-                        loadOp: 'clear',
-                        storeOp: 'store',
-                    }],
-                    depthStencilAttachment: {
-                        view: resolutionDependentStuff.depthBufferView,
-                        depthClearValue: 0.0, // reverse z
-                        depthLoadOp: 'clear',
-                        depthStoreOp: 'store',
-                    },
-                });
-                clusterRenderer.encode(geometryPass, params.renderSettings.lod);
-                geometryPass.end();
-            } else {
-                clusterRenderer.encodeIndirect(
-                    encoder,
-                    resolutionDependentStuff.backBufferView,
-                    resolutionDependentStuff.depthBufferView,
-                );
-            }
+
+            clusterRenderer.encodeIndirect(
+                encoder,
+                resolutionDependentStuff.backBufferView,
+                resolutionDependentStuff.depthBufferView,
+            );
 
             const pass = encoder.beginRenderPass({
                 colorAttachments: [{
