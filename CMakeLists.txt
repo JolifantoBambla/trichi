@@ -48,9 +48,9 @@ if (TRICHI_BUILD_CLI)
     CPMAddPackage("gh:assimp/assimp#v5.4.2")
     CPMAddPackage("gh:p-ranav/argparse#v3.0")
 
-    add_executable(example
+    add_executable(dump_trichi_js
             src/main.cpp)
-    target_link_libraries(example
+    target_link_libraries(dump_trichi_js
             trichi
             assimp
             argparse::argparse)

@@ -17,7 +17,7 @@
 #include "trichi.hpp"
 
 int main(int argc, char* argv[]) {
-  argparse::ArgumentParser program("example");
+  argparse::ArgumentParser program("dump_trichi_js");
   program.add_description("Creates clusters hierarchies and dump them as JS files.");
 
   program.add_argument("-f", "--files")
