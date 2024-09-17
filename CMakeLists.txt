@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(trichi
         VERSION 0.1.0
         DESCRIPTION "Creates a hierarchical triangle cluster DAG"
-        HOMEPAGE_URL "https://jolifantobambla.github.io/per-meshlet-nuances/"
+        HOMEPAGE_URL "https://jolifantobambla.github.io/trichi/"
         LANGUAGES C CXX
 )
 
