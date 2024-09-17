@@ -28,7 +28,7 @@ struct Params {
    * A weighting factor for the importance of cluster normal cones used when building the clusters.
    * In range [0..1].
    */
-  float clusterConeWeight = 0.5;
+  float clusterConeWeight = 0.0;
 
   /**
    * The target number of clusters per group.
