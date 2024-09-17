@@ -9,7 +9,7 @@ project(trichi
 set(CMAKE_CXX_STANDARD 20)
 
 option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
-option(TRICHI_BUILD_CLI "Build cli" ON)
+option(TRICHI_BUILD_CLI "Build cli (only for native builds)" ON)
 
 # add dependencies
 include(cmake/CPM.cmake)
@@ -33,25 +33,25 @@ target_link_libraries(trichi
         libmetis
 )
 
-if (EMSCRIPTEN)
-    add_subdirectory(js)
-endif (EMSCRIPTEN)
-
 if (TRICHI_PARALLEL)
     target_link_libraries(trichi BS_thread_pool)
     target_compile_definitions(trichi PRIVATE TRICHI_PARALLEL)
 endif (TRICHI_PARALLEL)
 
-# example
-# todo: move to own subdirectory
-if (TRICHI_BUILD_CLI)
-    CPMAddPackage("gh:assimp/assimp#v5.4.2")
-    CPMAddPackage("gh:p-ranav/argparse#v3.0")
+if (EMSCRIPTEN)
+    add_subdirectory(js)
+else (EMSCRIPTEN)
+    # js dump test thingy
+    # todo: move to own subdirectory
+    if (TRICHI_BUILD_CLI)
+        CPMAddPackage("gh:assimp/assimp#v5.4.2")
+        CPMAddPackage("gh:p-ranav/argparse#v3.0")
 
-    add_executable(dump_trichi_js
-            src/main.cpp)
-    target_link_libraries(dump_trichi_js
-            trichi
-            assimp
-            argparse::argparse)
-endif (TRICHI_BUILD_CLI)
+        add_executable(dump_trichi_js
+                src/main.cpp)
+        target_link_libraries(dump_trichi_js
+                trichi
+                assimp
+                argparse::argparse)
+    endif (TRICHI_BUILD_CLI)
+endif (EMSCRIPTEN)
