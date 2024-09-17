@@ -1,17 +1,11 @@
-# Tri Chi: Triangle Cluster Hierarchy
+# Tri Chi: Triangle Cluster Hierarchy (WIP)
+
+**This library is still in development. The API is not yet stable and the implementation is neither optimized for runtime performance nor quality, nor does it handle all edge cases.
+If you want to help change that, you are more than welcome to submit a PR :)**
 
 A library for generating triangle cluster hierarchies for per-cluster LOD selection & rendering.
 
-Poor man's nanite. Creates a triangle cluster hierarchy that can be used to select the appropriate levels of detail for different regions of a mesh on a per-cluster basis during rendering.
-
-Note that this library only preprocesses triangle meshes but does not provide any rendering solution. There is, however, a WebGPU demo that demonstrates what a renderer for such cluster hierarchies could look like.
-
-## Disclaimer
-
-The API is not yet stable and the implementation is neither optimized for runtime performance nor quality.
-If you want to help change that, any help is more than welcome :)
-
-Preprocessing a 4.3 million triangle mesh sequentially takes about 100 seconds, and 75 seconds in parallel.
+Note that this library only preprocesses triangle meshes but provides no rendering solution. Check out the [WebGPU demo](https://jolifantobambla.github.io/trichi/) (**takes its sweet time to load!**) to see what a very naive renderer for such cluster hierarchies could look like.
 
 ## Getting Started
 
@@ -32,7 +26,20 @@ target_link_libraries(${YOUR_TARGET} trichi)
 ```cpp
 #include "trichi.hpp"
 
-const auto clusterHierarchy = trichi::build_cluster_hierarchy(/* ... */);
+const std::vector<uint32_t> indices = /* triangle indices */
+const std::vector<float> vertices = /* the first three floats of a vertex should be its 3d position */
+const auto clusterHierarchy = trichi::buildClusterHierarchy(
+  indices,
+  vertices,
+  vertexStrideInBytes,
+  trichi::Params {
+    .maxVerticesPerCluster: 64,
+    .maxTrianglesPerCluster: 128,
+    .clusterConeWeight: 0.0,
+    .targetClustersPerGroup: 4,
+    .maxHierarchyDepth: 25,
+    .threadPoolSize: std::thread::hardware_concurrency(),
+  });
 ```
 
 
@@ -40,13 +47,13 @@ const auto clusterHierarchy = trichi::build_cluster_hierarchy(/* ... */);
 
  - [meshoptimizer](https://github.com/zeux/meshoptimizer): used for triangle clustering and mesh simplification, MIT licensed
  - [METIS](https://github.com/KarypisLab/METIS): used for grouping neighboring triangle clusters, Apache 2.0 licensed
- - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with multithreading option): used for parallelizing some dag construction steps, MIT licensed
+ - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with the `TRICHI_PARALLEL` option): used for parallelizing some dag construction steps, MIT licensed
 
 ## Caveats
 
-### No faceted meshes supported
+### No faceted meshes supported yet
 
-All steps of the algorithm build on the assumption that the input mesh is contiguous. It is the user's responsibility to ensure that this condition is satisfied, e.g., by welding similar vertices beforehand.
+The algorithm builds on the assumption that the input mesh is contiguous. It is currently the user's responsibility to ensure that this condition is satisfied, e.g., by welding similar vertices beforehand.
 
 ## Related Projects
 
