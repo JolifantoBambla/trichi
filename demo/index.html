@@ -13,7 +13,7 @@
 </div>
 
 <script type="module">
-    import TrichiJs from './trichi/trichi-wasm.js';
+    import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
 
     import {vec3n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
     import {FPSCameraController} from './fps-camera.js';
@@ -24,6 +24,8 @@
 
     const urlParams = new URLSearchParams(window.location.search);
     const useTimestampQuery = urlParams.has('timestamp_query');
+
+    const trichiWorker = Comlink.wrap(new Worker('trichi-worker.js', {type: 'module'}));
 
     async function main(trichi) {
         if (!('gpu' in navigator)) {
@@ -214,6 +216,19 @@
         let transform = mat4n.identity();
         let radiusScale = 1.0;
 
+        async function processModel(file) {
+            console.log(file);
+            await trichiWorker(
+                Comlink.transfer(file, [file.bytes.buffer]),
+                Comlink.proxy((newMesh, trans, scalingFactor) => {
+                    clusterRenderer.newMesh(newMesh);
+                    transform = trans;
+                    radiusScale = scalingFactor;
+                    cameraController.reset({});
+                }),
+            );
+        }
+
         // todo: debounce
         // todo: load in worker
         const dropZoneId = 'container';
@@ -233,53 +248,8 @@
                             if (files.length === 0) {
                                 return;
                             }
-
                             console.log('processing', files[0].name);
-
-                            const trichiParams = {
-                                maxVerticesPerCluster: 64,
-                                maxTrianglesPerCluster: 128,
-                                clusterConeWeight: 0.0,
-                                targetClustersPerGroup: 4,
-                                maxHierarchyDepth: 25,
-                                threadPoolSize: 1,
-                            };
-                            const newMesh = trichi.buildTriangleClusterHierarchyFromFileBlob(
-                                files[0].name,
-                                files[0].bytes,
-                                trichiParams,
-                            );
-
-                            const aabb = {
-                                min: [newMesh.vertices[0], newMesh.vertices[1], newMesh.vertices[2]],
-                                max: [newMesh.vertices[0], newMesh.vertices[1], newMesh.vertices[2]],
-                            };
-                            for (let i = 3; i < newMesh.vertices.length; i += 3) {
-                                aabb.min[0] = Math.min(aabb.min[0], newMesh.vertices[i]);
-                                aabb.min[1] = Math.min(aabb.min[1], newMesh.vertices[i + 1]);
-                                aabb.min[2] = Math.min(aabb.min[2], newMesh.vertices[i + 2]);
-                                aabb.max[0] = Math.max(aabb.max[0], newMesh.vertices[i]);
-                                aabb.max[1] = Math.max(aabb.max[1], newMesh.vertices[i + 1]);
-                                aabb.max[2] = Math.max(aabb.max[2], newMesh.vertices[i + 2]);
-                            }
-
-                            const diag = [
-                                aabb.max[0] - aabb.min[0],
-                                aabb.max[1] - aabb.min[1],
-                                aabb.max[2] - aabb.min[2],
-                            ];
-                            const scalingFactor = 10.0 / Math.max(...diag);
-                            const trans = mat4n.multiply(
-                                mat4n.uniformScaling(scalingFactor),
-                                mat4n.translation([-diag[0] / 2, -diag[1] / 2, -diag[2] / 2]),
-                            );
-
-                            newMesh.numMeshlets = newMesh.clusters.length / 4;
-
-                            clusterRenderer.newMesh(newMesh);
-                            transform = trans;
-                            radiusScale = scalingFactor;
-                            cameraController.reset({});
+                            return processModel(files[0]);
                         });
                     }
                 }
@@ -325,7 +295,6 @@
 
             const encoder = device.createCommandEncoder();
 
-
             clusterRenderer.encodeIndirect(
                 encoder,
                 resolutionDependentStuff.backBufferView,
@@ -352,7 +321,8 @@
         render();
     }
 
-    new TrichiJs().then(main);
+    main(null);
+    //new TrichiJs().then(main);
 </script>
 </body>
 </html>
