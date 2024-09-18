@@ -216,6 +216,7 @@
         let transform = mat4n.identity();
         let radiusScale = 1.0;
 
+        let isProcessingModel = false;
         async function processModel(file) {
             console.log(file);
             await trichiWorker(
@@ -225,12 +226,15 @@
                     transform = trans;
                     radiusScale = scalingFactor;
                     cameraController.reset({});
+                    isProcessingModel = false;
+                }),
+                Comlink.proxy(e => {
+                    console.log('failed to process model:', e);
+                    isProcessingModel = false;
                 }),
             );
         }
 
-        // todo: debounce
-        // todo: load in worker
         const dropZoneId = 'container';
         ['dragenter', 'dragover', 'drop'].forEach(eventName => {
             window.addEventListener(eventName, e => {
@@ -238,6 +242,10 @@
                     e.preventDefault();
                     if (eventName === 'drop') {
                         e.dataTransfer.dropEffect = 'move';
+                        if (isProcessingModel) {
+                            console.log('currently processing a model, ignoring dropped file(s)');
+                            return;
+                        }
                         Promise.all([...e.dataTransfer.items]
                             .filter(i => i.kind === 'file')
                             .map(async f => {
@@ -247,6 +255,11 @@
                         ).then(files => {
                             if (files.length === 0) {
                                 return;
+                            }
+                            isProcessingModel = true;
+
+                            if (files.length > 1) {
+                                console.log('multiple files dropped, ignoring all but the first one');
                             }
                             console.log('processing', files[0].name);
                             return processModel(files[0]);
