@@ -3,7 +3,7 @@ import {mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js'
 
 console.log('worker script');
 
-import initTrichiJs from './trichi/trichi.js';
+import initTrichiJs from './trichi/trichi.module.min.js';
 
 let trichi;
 let threadPoolSize = 1;
@@ -11,9 +11,7 @@ let threadPoolSize = 1;
 async function processModel(file, onModelProcessed, onError) {
     try {
         if (!trichi) {
-            console.log('hello', initTrichiJs);
             trichi = await initTrichiJs(navigator.hardwareConcurrency);
-            console.log(trichi);
         }
 
         const trichiParams = {
