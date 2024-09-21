@@ -225,7 +225,7 @@ struct ClusterHierarchy {
    * Triangles (triplets of indices into `vertices`) of the clusters in the hierarchy.
    *
    * The first and last (exclusive) of a cluster c's triangles are:
-   *    vertices[c.triangle_offset], vertices[c.triangle_offset + c.triangle_count * 3]
+   *    triangles[c.triangle_offset], triangles[c.triangle_offset + c.triangle_count * 3]
    */
   std::vector<uint8_t> triangles{};
 };

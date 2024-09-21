@@ -39,7 +39,7 @@ supported.
 Also, processing a model in the browser is
 much slower than the native version. E.g.,
 processing the 4.3 million triangle model
-takes 75 seconds on native vs. 52 minutes in
+takes 75 seconds on native vs. 15 minutes in
 the browser.
 Keep that in mind when choosing a model to try
 it out - models like Lucy, Happy Buddha, etc.

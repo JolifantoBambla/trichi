@@ -1,25 +1,40 @@
-# Tri Chi JavaScript Bindings
+# Tri Chi
 
-## Install dependencies
+WebAssembly & JavaScript bindings for the [Tri Chi library](https://github.com/JolifantoBambla/trichi).
 
+**This library is still in development. The API is not yet stable and the implementation is neither optimized for runtime performance nor quality, nor does it handle all edge cases.
+If you want to help change that, you are more than welcome to submit a PR :)**
+
+## Docs
+
+Find the docs [here](jolifantobambla.github.io/trichi/js).
+
+Try it out [here](jolifantobambla.github.io/trichi/demo).
+
+## Installation
+
+### NPM
+
+```bash
+npm install trichi
 ```
-sudo apt-get install emscripten
+
+```js
+import initTrichiJs from 'trichi';
 ```
 
-## Build
+### From GitHub
 
-```
-mkdir build && cd build
-cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_PARALLEL=OFF -DTRICHI_BUILD_CLI=OFF -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
-cmake --build . --target trichi-wasm
+```js
+import initTrichiJs from 'https://jolifantobambla.github.io/trichi/js/dist/0.x/trichi.module.min.js';
 ```
 
 ## Usage
 
 ```js
-import TrichiJs from './trichi-wasm.js';
+import initTrichiJs from 'trichi';
 
-new TrichiJs().then(trichi => {
+initTrichiJs().then(trichi => {
     const triangleClusterHierarchy = trichi.buildTriangleClusterHierarchy(
         indices,
         vertices,
