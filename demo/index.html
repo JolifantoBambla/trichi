@@ -20,7 +20,6 @@
     import {makeUi} from './ui.js';
     import {webgpuNotSupported} from './util.js';
     import {makeClusterRenderer} from './cluster-renderer.js';
-    import {mesh} from './demo-mesh.js';
 
     const urlParams = new URLSearchParams(window.location.search);
     const useTimestampQuery = urlParams.has('timestamp_query');
@@ -140,7 +139,7 @@
             ],
         });
 
-        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, mesh, true);
+        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, null, true);
 
         const resolutionDependentStuff = {
             projection,
@@ -216,6 +215,7 @@
         let transform = mat4n.identity();
         let radiusScale = 1.0;
 
+        let hasMesh = false;
         let isProcessingModel = false;
         async function processModel(file) {
             console.log(file);
@@ -228,6 +228,7 @@
                     radiusScale = scalingFactor;
                     cameraController.reset({});
                     isProcessingModel = false;
+                    hasMesh = true;
                 }),
                 Comlink.proxy(e => {
                     console.log('failed to process model:', e);
@@ -309,11 +310,13 @@
 
             const encoder = device.createCommandEncoder();
 
-            clusterRenderer.encodeIndirect(
-                encoder,
-                resolutionDependentStuff.backBufferView,
-                resolutionDependentStuff.depthBufferView,
-            );
+            if (hasMesh) {
+                clusterRenderer.encodeIndirect(
+                    encoder,
+                    resolutionDependentStuff.backBufferView,
+                    resolutionDependentStuff.depthBufferView,
+                );
+            }
 
             const pass = encoder.beginRenderPass({
                 colorAttachments: [{

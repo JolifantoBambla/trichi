@@ -125,7 +125,7 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
     return pipeline;
 }
 
-export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFormat = 'depth24plus', initialMesh, reverseZ = true) {
+export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFormat = 'depth24plus', initialMesh = null, reverseZ = true) {
     const bindGroupLayouts = {
         perFrameUniformsLayout: device.createBindGroupLayout({
             label: 'per frame uniforms',
@@ -358,7 +358,7 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
         return bindGroups;
     }
 
-    let currentMesh = makeMeshBindgroups(initialMesh);
+    let currentMesh = initialMesh ? makeMeshBindgroups(initialMesh) : null;
 
     return {
         update({view, projection, position}, {instances}, {resolution, zNear, threshold, radiusScale}, {renderMode}, updateCullingCamera = true) {

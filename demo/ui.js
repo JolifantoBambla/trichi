@@ -4,7 +4,7 @@ export function makeUi() {
     const params = {
         renderSettings: {
             updateCullingCamera: true,
-            errorThreshold: 1.0,
+            errorThreshold: 0.05,
             renderMode: 'clusterId',
         },
     };
