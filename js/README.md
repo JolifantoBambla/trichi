@@ -7,9 +7,9 @@ If you want to help change that, you are more than welcome to submit a PR :)**
 
 ## Docs
 
-Find the docs [here](jolifantobambla.github.io/trichi/js).
+Find the docs [here](https://jolifantobambla.github.io/trichi/js/).
 
-Try it out [here](jolifantobambla.github.io/trichi/demo).
+Try it out [here](https://jolifantobambla.github.io/trichi/js/jolifantobambla.github.io/trichi/).
 
 ## Installation
 
