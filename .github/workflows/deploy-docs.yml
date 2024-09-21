@@ -31,8 +31,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4.0.2
       - name: Populate model
         run: cd demo && rm demo-mesh.js && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
+      - name: Install Dependencies
+        run: cd js && npm install
+      - name: Build Docs
+        run: cd js && npm run docs
+      - name: Publish dist and demo folder with docs
+        run: |
+          cp -r js/docs demo/js
+          cp -r js/dist demo/js/dist
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

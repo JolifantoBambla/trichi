@@ -1,0 +1,52 @@
+{
+  "name": "trichi",
+  "version": "0.1.0",
+  "description": "A library to generate triangle  cluster hierarchies from 3d meshes for per-surface patch LOD selection & rendering.",
+  "type": "module",
+  "main": "dist/0.x/trichi.module.js",
+  "module": "dist/0.x/trichi.module.js",
+  "types": "dist/0.x/trichi.d.ts",
+  "files": [
+    "/dist/**"
+  ],
+  "scripts": {
+    "docs": "typedoc src/trichi.ts",
+    "build": "rollup -c",
+    "lint": "eslint \"src/trichi.ts\""
+  },
+  "keywords": [
+  ],
+  "author": "Lukas Herzberger",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/JolifantoBambla/trichi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JolifantoBambla/trichi.git"
+  },
+  "homepage": "https://jolifantobambla.github.io/trichi/js",
+  "dependencies": {
+    "wasm-feature-detect": "^1.8.0"
+  },
+  "devDependencies": {
+    "@rollup-extras/plugin-copy": "^1.9.3",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@rollup/plugin-wasm": "^6.2.2",
+    "@tsconfig/recommended": "1.0.6",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@webgpu/types": "^0.1.44",
+    "eslint": "^8.56.0",
+    "eslint-plugin-html": "^8.1.1",
+    "eslint-plugin-one-variable-per-var": "0.0.3",
+    "eslint-plugin-optional-comma-spacing": "^0.0.4",
+    "eslint-plugin-require-trailing-comma": "0.0.1",
+    "rollup": "^4.18.0",
+    "tslib": "^2.6.2",
+    "typedoc": "^0.25.13",
+    "typescript": "^5.4.5"
+  }
+}
