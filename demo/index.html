@@ -27,7 +27,7 @@
 
     const trichiWorker = Comlink.wrap(new Worker('trichi-worker.js', {type: 'module'}));
 
-    async function main(trichi) {
+    async function main() {
         if (!('gpu' in navigator)) {
             webgpuNotSupported();
             return;
@@ -219,6 +219,7 @@
         let isProcessingModel = false;
         async function processModel(file) {
             console.log(file);
+            console.log(trichiWorker);
             await trichiWorker(
                 Comlink.transfer(file, [file.bytes.buffer]),
                 Comlink.proxy((newMesh, trans, scalingFactor) => {
@@ -334,8 +335,7 @@
         render();
     }
 
-    main(null);
-    //new TrichiJs().then(main);
+    main();
 </script>
 </body>
 </html>

@@ -1,8 +1,9 @@
 import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
-import {threads} from "https://unpkg.com/wasm-feature-detect?module";
 import {mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
 
-import TrichiJs from './trichi/trichi-wasm.js';
+console.log('worker script');
+
+import initTrichiJs from './trichi/trichi.js';
 
 let trichi;
 let threadPoolSize = 1;
@@ -10,11 +11,9 @@ let threadPoolSize = 1;
 async function processModel(file, onModelProcessed, onError) {
     try {
         if (!trichi) {
-            const hasThreads = await threads();
-            console.log('has threads', hasThreads);
-            threadPoolSize = hasThreads ? navigator.hardwareConcurrency : 1;
-            console.log('thread pool size', threadPoolSize);
-            trichi = await new TrichiJs({maxThreads: threadPoolSize});
+            console.log('hello', initTrichiJs);
+            trichi = await initTrichiJs(navigator.hardwareConcurrency);
+            console.log(trichi);
         }
 
         const trichiParams = {
@@ -56,6 +55,10 @@ async function processModel(file, onModelProcessed, onError) {
         );
 
         mesh.numMeshlets = mesh.clusters.length / 4;
+        mesh.meshletVertices = mesh.clusterVertices;
+        mesh.meshletTriangles = mesh.clusterTriangles;
+
+        console.log(mesh);
 
         onModelProcessed(
             Comlink.transfer(

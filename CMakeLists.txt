@@ -68,7 +68,7 @@ if (EMSCRIPTEN)
     endif (TRICHI_PARALLEL)
 
     if (TRICHI_BUILD_JS_MODULE)
-        add_subdirectory(js)
+        add_subdirectory(wasm)
     endif (TRICHI_BUILD_JS_MODULE)
 else (EMSCRIPTEN)
     # js dump test thingy
