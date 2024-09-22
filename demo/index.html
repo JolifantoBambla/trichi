@@ -18,7 +18,7 @@
     import {vec3n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
     import {FPSCameraController} from './fps-camera.js';
     import {makeUi} from './ui.js';
-    import {webgpuNotSupported} from './util.js';
+    import {webgpuNotSupported, showStatusMessage} from './util.js';
     import {makeClusterRenderer} from './cluster-renderer.js';
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -143,15 +143,19 @@
 
         let hasMesh = false;
         let isProcessingModel = false;
+        let dialogBox = null;
 
         (async () => {
             isProcessingModel = true;
             try {
+                dialogBox = showStatusMessage('Loading 3D model ...');
                 const m = await import('https://jolifantobambla.github.io/trichi/demo-mesh.js');
                 clusterRenderer.newMesh(m.mesh);
             } catch (e) {
                 console.log(e);
             }
+            dialogBox.close();
+            dialogBox = null;
             hasMesh = true;
             isProcessingModel = false;
         })();
@@ -240,6 +244,10 @@
                     transform = trans;
                     radiusScale = scalingFactor;
                     cameraController.reset({});
+                    if (dialogBox) {
+                        dialogBox.close();
+                        dialogBox = null;
+                    }
                     isProcessingModel = false;
                     hasMesh = true;
                 }),
@@ -258,6 +266,10 @@
                     if (eventName === 'drop') {
                         e.dataTransfer.dropEffect = 'move';
                         if (isProcessingModel) {
+                            if (!dialogBox) {
+                                dialogBox = showStatusMessage('currently processing a model, ignoring dropped file(s)');
+                                setTimeout(_ => dialogBox && dialogBox.close(), 5000);
+                            }
                             console.log('currently processing a model, ignoring dropped file(s)');
                             return;
                         }
