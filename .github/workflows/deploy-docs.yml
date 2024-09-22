@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node.js environment
         uses: actions/setup-node@v4.0.2
       - name: Populate model
-        run: cd demo && rm demo-mesh.js && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
+        run: cd demo && curl -O https://jolifantobambla.github.io/trichi/demo-mesh.js
       - name: Install Dependencies
         run: cd js && npm install
       - name: Build Docs
