@@ -141,6 +141,21 @@
 
         const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, null, true);
 
+        let hasMesh = false;
+        let isProcessingModel = false;
+
+        (async () => {
+            isProcessingModel = true;
+            try {
+                const m = await import('https://jolifantobambla.github.io/trichi/demo-mesh.js');
+                clusterRenderer.newMesh(m.mesh);
+            } catch (e) {
+                console.log(e);
+            }
+            hasMesh = true;
+            isProcessingModel = false;
+        })();
+
         const resolutionDependentStuff = {
             projection,
             backBuffer,
@@ -215,8 +230,6 @@
         let transform = mat4n.identity();
         let radiusScale = 1.0;
 
-        let hasMesh = false;
-        let isProcessingModel = false;
         async function processModel(file) {
             console.log(file);
             console.log(trichiWorker);
