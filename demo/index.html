@@ -18,9 +18,8 @@
     import {vec3n, mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
     import {FPSCameraController} from './fps-camera.js';
     import {makeUi} from './ui.js';
-    import {webgpuNotSupported} from './util.js';
+    import {webgpuNotSupported, showStatusMessage} from './util.js';
     import {makeClusterRenderer} from './cluster-renderer.js';
-    import {mesh} from './demo-mesh.js';
 
     const urlParams = new URLSearchParams(window.location.search);
     const useTimestampQuery = urlParams.has('timestamp_query');
@@ -140,7 +139,26 @@
             ],
         });
 
-        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, mesh, true);
+        const clusterRenderer = makeClusterRenderer(device, backBuffer.format, depthBuffer.format, null, true);
+
+        let hasMesh = false;
+        let isProcessingModel = false;
+        let dialogBox = null;
+
+        (async () => {
+            isProcessingModel = true;
+            try {
+                dialogBox = showStatusMessage('Loading 3D model ...');
+                const m = await import('https://jolifantobambla.github.io/trichi/demo-mesh.js');
+                clusterRenderer.newMesh(m.mesh);
+            } catch (e) {
+                console.log(e);
+            }
+            dialogBox.close();
+            dialogBox = null;
+            hasMesh = true;
+            isProcessingModel = false;
+        })();
 
         const resolutionDependentStuff = {
             projection,
@@ -216,7 +234,6 @@
         let transform = mat4n.identity();
         let radiusScale = 1.0;
 
-        let isProcessingModel = false;
         async function processModel(file) {
             console.log(file);
             console.log(trichiWorker);
@@ -227,7 +244,12 @@
                     transform = trans;
                     radiusScale = scalingFactor;
                     cameraController.reset({});
+                    if (dialogBox) {
+                        dialogBox.close();
+                        dialogBox = null;
+                    }
                     isProcessingModel = false;
+                    hasMesh = true;
                 }),
                 Comlink.proxy(e => {
                     console.log('failed to process model:', e);
@@ -244,6 +266,10 @@
                     if (eventName === 'drop') {
                         e.dataTransfer.dropEffect = 'move';
                         if (isProcessingModel) {
+                            if (!dialogBox) {
+                                dialogBox = showStatusMessage('currently processing a model, ignoring dropped file(s)');
+                                setTimeout(_ => dialogBox && dialogBox.close(), 5000);
+                            }
                             console.log('currently processing a model, ignoring dropped file(s)');
                             return;
                         }
@@ -309,11 +335,13 @@
 
             const encoder = device.createCommandEncoder();
 
-            clusterRenderer.encodeIndirect(
-                encoder,
-                resolutionDependentStuff.backBufferView,
-                resolutionDependentStuff.depthBufferView,
-            );
+            if (hasMesh) {
+                clusterRenderer.encodeIndirect(
+                    encoder,
+                    resolutionDependentStuff.backBufferView,
+                    resolutionDependentStuff.depthBufferView,
+                );
+            }
 
             const pass = encoder.beginRenderPass({
                 colorAttachments: [{
