@@ -2,7 +2,7 @@ export const cullClustersShader = `
 const f32_max: f32 = 3.40282e+38;
 
 override WORKGROUP_SIZE: u32 = 256u;
-override MAX_TRIANGLES_PER_CLUSTER: u32 = 128;
+override MAX_TRIANGLES_PER_CLUSTER: u32 = 128u;
 
 struct Camera {
     view: mat4x4<f32>,
@@ -16,7 +16,7 @@ struct ErrorProjectionParams {
     resolution: f32,
     z_near: f32,
     threshold: f32,
-    radius_scale: f32,
+    pad: f32,
 }
 
 struct Instance {
@@ -69,21 +69,21 @@ struct ClusterBounds {
 @group(3) @binding(0) var<storage, read_write> visible_cluster_instances: array<ClusterInstance>;
 @group(3) @binding(1) var<storage, read_write> render_clusters_args: DrawIndirectArgs;
 
-// from Nexus
-// https://github.com/cnr-isti-vclab/nexus/blob/ae6bf8601303884250d3c73b9e1d4cbe179f9b92/src/common/metric.h#L53
+// from Patrick Cozzi and Kevin Ring, "3D Engine Design for Virtual Globes"
 fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
     if bounds.error == 0.0 || bounds.error == f32_max {
         return bounds.error;
     }
-    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - (bounds.radius * error_projection_params.radius_scale);
+    let scale = length(transform[0].xyz);
+    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - (bounds.radius * scale);
     if dist < error_projection_params.z_near {
         dist = error_projection_params.z_near;
     }
-    let size = dist * error_projection_params.resolution;
+    let size = error_projection_params.resolution / dist;
     if size <= 0.00001 {
-        return f32_max;
+        return f32_max - 1.0;
     } else {
-        return bounds.error / size;
+        return bounds.error * size;
     }
 }
 
@@ -129,7 +129,7 @@ fn choose_lods_and_cull_clusters(@builtin(global_invocation_id) global_id: vec3<
 
     // frustum culling
     let center = (transform * vec4(bounds.center, 1.0)).xyz;
-    let radius = bounds.radius * error_projection_params.radius_scale;
+    let radius = bounds.radius * length(transform[0].xyz);
     var visible =
         (dot(vec4(center, 1.0), camera.frustum[0]) + radius >= 0.0) &&
         (dot(vec4(center, 1.0), camera.frustum[1]) + radius >= 0.0) &&

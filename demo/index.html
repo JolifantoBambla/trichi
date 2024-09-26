@@ -65,10 +65,11 @@
         const cameraController = new FPSCameraController(canvas);
 
         const fovRad = 45.0 * (Math.PI / 180.0);
+        const zNear = 1.0;
         const projection = mat4n.perspectiveReverseZ(
             fovRad,
             resolution[0] / resolution[1],
-            1.0,
+            zNear,
         );
 
         const backBuffer = device.createTexture({
@@ -167,22 +168,8 @@
             depthBuffer,
             depthBufferView,
             presentBindGroup,
+            errorProjectionResolution: resolution[0] / (2.0 * Math.tan(fovRad)),
         };
-
-        // from Nexus
-        // https://github.com/cnr-isti-vclab/nexus/blob/ae6bf8601303884250d3c73b9e1d4cbe179f9b92/src/common/frustum.cpp#L49
-        const setErrorProjectionParams = _ => {
-            const invProj = mat4n.inverse(resolutionDependentStuff.projection);
-            const c = vec3n.transformMat4(vec3n.create(0, 0, 1), invProj);
-            const s = vec3n.transformMat4(vec3n.create(1, 0, 1), invProj);
-            const zNear = vec3n.length(c);
-            const side = vec3n.length(vec3n.subtract(s, c));
-            resolutionDependentStuff.errorProjectionParams = {
-                resolution: (2.0 * side / zNear) / resolution[1],
-                zNear,
-            };
-        };
-        setErrorProjectionParams();
 
         let resizeInProgress = false;
         const handleResize = _ => {
@@ -219,7 +206,7 @@
                 ],
             });
 
-            setErrorProjectionParams();
+            resolutionDependentStuff.errorProjectionResolution = resolution[0] / (2.0 * Math.tan(fovRad));
 
             resizeInProgress = false;
         };
@@ -232,17 +219,15 @@
         });
 
         let transform = mat4n.identity();
-        let radiusScale = 1.0;
 
         async function processModel(file) {
             console.log(file);
             console.log(trichiWorker);
             await trichiWorker(
                 Comlink.transfer(file, [file.bytes.buffer]),
-                Comlink.proxy((newMesh, trans, scalingFactor) => {
+                Comlink.proxy((newMesh, trans) => {
                     clusterRenderer.newMesh(newMesh);
                     transform = trans;
-                    radiusScale = scalingFactor;
                     cameraController.reset({});
                     if (dialogBox) {
                         dialogBox.close();
@@ -323,9 +308,9 @@
                 },
                 {instances: [transform]},
                 {
-                    ...resolutionDependentStuff.errorProjectionParams,
+                    resolution: resolutionDependentStuff.errorProjectionResolution,
+                    zNear,
                     threshold: params.renderSettings.errorThreshold,
-                    radiusScale
                 },
                 {
                     renderMode: params.renderSettings.renderMode === 'triangleId' ? 1 : 0,

@@ -361,12 +361,12 @@ export function makeClusterRenderer(device, colorFormat = 'rgba16float', depthFo
     let currentMesh = initialMesh ? makeMeshBindgroups(initialMesh) : null;
 
     return {
-        update({view, projection, position}, {instances}, {resolution, zNear, threshold, radiusScale}, {renderMode}, updateCullingCamera = true) {
+        update({view, projection, position}, {instances}, {resolution, zNear, threshold}, {renderMode}, updateCullingCamera = true) {
             device.queue.writeBuffer(indirectDrawArgsBuffer, 0, new Uint32Array([0, 0, 0, 0]));
             device.queue.writeBuffer(cameraBuffer, 0, new Float32Array([...view, ...projection]));
             device.queue.writeBuffer(renderSettingsBuffer, 0, new Uint32Array([renderMode]));
             device.queue.writeBuffer(instancesBuffer, 0, new Float32Array([...instances.flat()]));
-            device.queue.writeBuffer(cullingConfigBuffer, 0, new Float32Array([resolution, zNear, threshold, radiusScale]));
+            device.queue.writeBuffer(cullingConfigBuffer, 0, new Float32Array([resolution, zNear, threshold, 0.0]));
             if (updateCullingCamera) {
                 const viewProjectionTranspose = mat4n.transpose(mat4n.mul(projection, view));
                 const x = vec4n.create(...mat4n.getAxis(viewProjectionTranspose, 0), viewProjectionTranspose[3]);

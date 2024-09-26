@@ -72,7 +72,6 @@ async function processModel(file, onModelProcessed, onError) {
                 ],
             ),
             transform,
-            scalingFactor,
         );
     } catch (e) {
         onError(e);

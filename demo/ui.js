@@ -4,7 +4,7 @@ export function makeUi() {
     const params = {
         renderSettings: {
             updateCullingCamera: true,
-            errorThreshold: 0.05,
+            errorThreshold: 0.009,
             renderMode: 'clusterId',
         },
     };
@@ -59,7 +59,7 @@ Have fun :)
         expanded: true,
     });
     renderSettingsFolder.addBinding(params.renderSettings, 'updateCullingCamera', {label: 'Update culling camera'});
-    renderSettingsFolder.addBinding(params.renderSettings, 'errorThreshold', {label: 'Error threshold', min: 0.0, max: 5.0, step: 0.001});
+    renderSettingsFolder.addBinding(params.renderSettings, 'errorThreshold', {label: 'Error threshold', min: 0.0, max: 1.0, step: 0.001});
     renderSettingsFolder.addBinding(params.renderSettings, 'renderMode', {label: 'Render mode', options: {'Cluster Ids': 'clusterId', 'Triangle Ids': 'triangleId'}});
 
     return params;
