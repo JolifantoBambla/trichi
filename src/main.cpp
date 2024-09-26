@@ -41,18 +41,28 @@ int main(int argc, char* argv[]) {
 
   const std::filesystem::path output_dir = program.get<std::string>("-o");
   for (auto files = program.get<std::vector<std::string>>("--files"); const auto& f : files) {
-    constexpr size_t vertexStride = 3 * sizeof(float);
+    constexpr size_t vertexStride = 6 * sizeof(float);
     std::vector<float> vertices{};
     std::vector<uint32_t> indices{};
     {
       Assimp::Importer importer;
+      importer.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE, 80.0);
       const struct aiScene* scene = importer.ReadFile(
-          f, aiProcess_Triangulate | aiProcess_OptimizeGraph | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType);
+          f,
+          aiProcess_Triangulate |
+              aiProcess_GenSmoothNormals |
+              aiProcess_ImproveCacheLocality |
+              aiProcess_OptimizeGraph |
+              aiProcess_JoinIdenticalVertices |
+              aiProcess_SortByPType);
 
       for (int i = 0; i < scene->mMeshes[0]->mNumVertices; ++i) {
         vertices.push_back(scene->mMeshes[0]->mVertices[i].x);
         vertices.push_back(scene->mMeshes[0]->mVertices[i].y);
         vertices.push_back(scene->mMeshes[0]->mVertices[i].z);
+        vertices.push_back(scene->mMeshes[0]->mNormals[i].x);
+        vertices.push_back(scene->mMeshes[0]->mNormals[i].y);
+        vertices.push_back(scene->mMeshes[0]->mNormals[i].z);
       }
       for (int i = 0; i < scene->mMeshes[0]->mNumFaces; ++i) {
         if (scene->mMeshes[0]->mFaces[i].mNumIndices != 3) {
@@ -91,7 +101,7 @@ int main(int argc, char* argv[]) {
     }
     js_stream << "]),\n";
 
-    js_stream << "  strideFloats: " << vertexStride / sizeof(float) << ",\n";
+    js_stream << "  vertexStrideFloats: " << vertexStride / sizeof(float) << ",\n";
 
     js_stream << "  clusters: new Uint32Array([";
     for (size_t i = 0; i < dag.clusters.size(); ++i) {
@@ -105,7 +115,7 @@ int main(int argc, char* argv[]) {
     }
     js_stream << "]),\n";
 
-    js_stream << "  meshletVertices: new Uint32Array([";
+    js_stream << "  clusterVertices: new Uint32Array([";
     for (size_t i = 0; i < dag.vertices.size(); ++i) {
       js_stream << dag.vertices[i];
       if (i != dag.vertices.size() - 1) {
@@ -114,7 +124,7 @@ int main(int argc, char* argv[]) {
     }
     js_stream << "]),\n";
 
-    js_stream << "  meshletTriangles: new Uint32Array([";
+    js_stream << "  clusterTriangles: new Uint32Array([";
     for (size_t i = 0; i < dag.triangles.size(); ++i) {
       js_stream << static_cast<uint32_t>(dag.triangles[i]);
       if (i != dag.triangles.size() - 1) {

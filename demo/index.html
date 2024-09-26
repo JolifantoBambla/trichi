@@ -150,7 +150,7 @@
             isProcessingModel = true;
             try {
                 dialogBox = showStatusMessage('Loading 3D model ...');
-                const m = await import('https://jolifantobambla.github.io/trichi/demo-mesh.js');
+                const m = await import('./Highpoly_2.1Mill_single_object.obj.js');//'https://jolifantobambla.github.io/trichi/demo-mesh.js');
                 clusterRenderer.newMesh(m.mesh);
             } catch (e) {
                 console.log(e);
@@ -313,7 +313,7 @@
                     threshold: params.renderSettings.errorThreshold,
                 },
                 {
-                    renderMode: params.renderSettings.renderMode === 'triangleId' ? 1 : 0,
+                    renderMode: params.renderSettings.renderMode === 'triangleId' ? 1 : params.renderSettings.renderMode === 'smooth' ? 2 : 0,
                 },
                 params.renderSettings.updateCullingCamera,
             );

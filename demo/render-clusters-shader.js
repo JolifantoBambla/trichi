@@ -1,5 +1,5 @@
 export const renderClusterWgsl = `
-override VERTEX_STRIDE_FLOATS: u32 = 3;
+override VERTEX_STRIDE_FLOATS: u32 = 6;
 
 struct Camera {
     view: mat4x4<f32>,
@@ -28,6 +28,7 @@ struct Meshlet {
 
 struct Vertex {
     position: vec3<f32>,
+    normal: vec3<f32>,
 }
 
 // per frame uniforms
@@ -52,6 +53,11 @@ fn get_vertex(meshlet: Meshlet, vertex_index: u32) -> Vertex {
             vertex_data[index + 1],
             vertex_data[index + 2],
         ),
+        vec3(
+            vertex_data[index + 3],
+            vertex_data[index + 4],
+            vertex_data[index + 5],
+        ),
     );
 }
 
@@ -62,6 +68,7 @@ fn get_meshlet_color(index: u32) -> vec3<f32> {
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) @interpolate(flat) id: u32,
+    @location(1) normal: vec3<f32>,
 }
 
 fn get_primitive_id(cluster_index: u32, vertex_index: u32) -> u32 {
@@ -82,6 +89,7 @@ fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_
         return VertexOut(
             vec4<f32>(1.0, 1.0, 1.0, 0.0), // position will be clipped
             0,
+            vec3<f32>(),
         );
     }
     
@@ -91,12 +99,17 @@ fn vertex(@builtin(instance_index) cluster_instance_index: u32, @builtin(vertex_
     return VertexOut(
         camera.projection * camera.view * model * vec4(vertex.position, 1.0),        
         get_primitive_id(cluster_instance.cluster_index, vertex_index),
+        normalize((camera.view * model * vec4(vertex.normal, 0.0)).xyz),
     );
 }
 
 @fragment
 fn fragment(frag_in: VertexOut) -> @location(0) vec4<f32> {
-    let albedo = get_meshlet_color(frag_in.id);
-    return vec4(saturate(albedo), 1.0);
+    if settings.render_mode == 2 {
+        return vec4<f32>(normalize(frag_in.normal), 1.0);
+    } else {
+        let albedo = get_meshlet_color(frag_in.id);
+        return vec4(saturate(albedo), 1.0);
+    }
 }
 `;

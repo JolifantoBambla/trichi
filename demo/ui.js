@@ -60,7 +60,7 @@ Have fun :)
     });
     renderSettingsFolder.addBinding(params.renderSettings, 'updateCullingCamera', {label: 'Update culling camera'});
     renderSettingsFolder.addBinding(params.renderSettings, 'errorThreshold', {label: 'Error threshold', min: 0.0, max: 1.0, step: 0.001});
-    renderSettingsFolder.addBinding(params.renderSettings, 'renderMode', {label: 'Render mode', options: {'Cluster Ids': 'clusterId', 'Triangle Ids': 'triangleId'}});
+    renderSettingsFolder.addBinding(params.renderSettings, 'renderMode', {label: 'Render mode', options: {'Cluster Ids': 'clusterId', 'Triangle Ids': 'triangleId', 'Normals': 'smooth'}});
 
     return params;
 }

@@ -71,11 +71,12 @@
       true);
   hierarchy.set("indices", indicesJs);
   hierarchy.set("vertices", verticesJs);
+  hierarchy.set("vertexStrideFloats", vertexStride / sizeof(float));
   return hierarchy;
 }
 
 [[nodiscard]] emscripten::val buildTriangleClusterHierarchyFromFileBlob(const std::string& fileName, const emscripten::val& bytesJs, const trichi::Params& params) {
-  const size_t floatsPerVertex = 3;
+  const size_t floatsPerVertex = 6;
   const size_t vertexStride = floatsPerVertex * sizeof(float);
   std::vector<float> vertices{};
   std::vector<uint32_t> indices{};
@@ -83,16 +84,25 @@
     const auto bytes = emscripten::convertJSArrayToNumberVector<uint8_t>(bytesJs);
 
     Assimp::Importer importer;
+    importer.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE, 80.0);
     const struct aiScene* scene = importer.ReadFileFromMemory(
         bytes.data(),
         bytes.size(),
-        aiProcess_Triangulate | aiProcess_OptimizeGraph | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType,
+        aiProcess_Triangulate |
+            aiProcess_GenSmoothNormals |
+            aiProcess_ImproveCacheLocality |
+            aiProcess_OptimizeGraph |
+            aiProcess_JoinIdenticalVertices |
+            aiProcess_SortByPType,
         fileName.c_str());
 
     for (int i = 0; i < scene->mMeshes[0]->mNumVertices; ++i) {
       vertices.push_back(scene->mMeshes[0]->mVertices[i].x);
       vertices.push_back(scene->mMeshes[0]->mVertices[i].y);
       vertices.push_back(scene->mMeshes[0]->mVertices[i].z);
+      vertices.push_back(scene->mMeshes[0]->mNormals[i].x);
+      vertices.push_back(scene->mMeshes[0]->mNormals[i].y);
+      vertices.push_back(scene->mMeshes[0]->mNormals[i].z);
     }
     for (int i = 0; i < scene->mMeshes[0]->mNumFaces; ++i) {
       if (scene->mMeshes[0]->mFaces[i].mNumIndices != 3) {
@@ -121,6 +131,7 @@
 
   hierarchy.set("indices", indicesJs);
   hierarchy.set("vertices", verticesJs);
+  hierarchy.set("vertexStrideFloats", floatsPerVertex);
 
   std::cout << "Processing done\n";
 

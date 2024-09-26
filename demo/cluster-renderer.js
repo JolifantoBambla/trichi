@@ -26,13 +26,13 @@ function makeMeshletBuffers(device, mesh) {
     });
     const meshletVerticesBuffer = device.createBuffer({
         label: 'meshlet vertices',
-        size: mesh.meshletVertices.byteLength,
+        size: mesh.clusterVertices.byteLength,
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
     const meshletTrianglesBuffer = device.createBuffer({
         label: 'meshlet triangles',
-        size: mesh.meshletTriangles.byteLength,
+        size: mesh.clusterTriangles.byteLength,
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
@@ -49,8 +49,8 @@ function makeMeshletBuffers(device, mesh) {
         mappedAtCreation: true,
     });
     (new Uint32Array(meshletsBuffer.getMappedRange())).set(mesh.clusters);
-    (new Uint32Array(meshletVerticesBuffer.getMappedRange())).set(mesh.meshletVertices);
-    (new Uint32Array(meshletTrianglesBuffer.getMappedRange())).set(mesh.meshletTriangles);
+    (new Uint32Array(meshletVerticesBuffer.getMappedRange())).set(mesh.clusterVertices);
+    (new Uint32Array(meshletTrianglesBuffer.getMappedRange())).set(mesh.clusterTriangles);
     (new Float32Array(errorsBuffer.getMappedRange())).set(mesh.errors);
     (new Float32Array(boundsBuffer.getMappedRange())).set(mesh.bounds);
     meshletsBuffer.unmap();
@@ -104,7 +104,7 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
             module: meshletModule,
             buffers: [],
             constants: {
-                VERTEX_STRIDE_FLOATS: 3,
+                VERTEX_STRIDE_FLOATS: 6,
             },
         },
         primitive: {
