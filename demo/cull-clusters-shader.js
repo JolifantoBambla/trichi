@@ -83,8 +83,7 @@ fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
     if size <= 0.00001 {
         return f32_max - 1.0;
     } else {
-        // todo: do I need to scale the geometric error?
-        return bounds.error * size;
+        return (bounds.error * scale) * size;
     }
 }
 
