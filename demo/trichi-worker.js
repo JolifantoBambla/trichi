@@ -32,7 +32,7 @@ async function processModel(file, onModelProcessed, onError) {
             min: [mesh.vertices[0], mesh.vertices[1], mesh.vertices[2]],
             max: [mesh.vertices[0], mesh.vertices[1], mesh.vertices[2]],
         };
-        for (let i = 3; i < mesh.vertices.length; i += 3) {
+        for (let i = 6; i < mesh.vertices.length; i += 6) {
             aabb.min[0] = Math.min(aabb.min[0], mesh.vertices[i]);
             aabb.min[1] = Math.min(aabb.min[1], mesh.vertices[i + 1]);
             aabb.min[2] = Math.min(aabb.min[2], mesh.vertices[i + 2]);

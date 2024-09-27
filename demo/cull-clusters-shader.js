@@ -75,7 +75,8 @@ fn project_error_bounds(transform: mat4x4<f32>, bounds: GroupError) -> f32 {
         return bounds.error;
     }
     let scale = length(transform[0].xyz);
-    var dist = distance((transform * vec4<f32>(bounds.center, 1.0)).xyz, camera.position) - (bounds.radius * scale);
+    let view = -vec3<f32>(camera.view[0].z, camera.view[1].z, camera.view[2].z);
+    var dist = dot((transform * vec4<f32>(bounds.center, 1.0)).xyz - camera.position, view) - (bounds.radius * scale);
     if dist < error_projection_params.z_near {
         dist = error_projection_params.z_near;
     }
