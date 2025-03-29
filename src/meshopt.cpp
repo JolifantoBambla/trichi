@@ -1,9 +1,7 @@
 /**
-* Copyright (c) 2024 Lukas Herzberger
+* Copyright (c) 2025 Lukas Herzberger
 * SPDX-License-Identifier: MIT
 */
-
-#include <unordered_set>
 
 #include "meshoptimizer.h"
 
@@ -27,8 +25,8 @@ namespace trichi {
     totalIndexCount += indexCountPerCluster[i];
   }
 
+  uint32_t maxVertexIndex = 0;
   std::vector<uint32_t> indicesPerCluster(totalIndexCount);
-  std::unordered_set<uint32_t> uniqueVertices{};
   for (size_t i = 0; i < clusterIndices.size(); ++i) {
     const auto& cluster = buffers.clusters[clusterIndices[i].index];
     for (size_t t = 0; t < cluster.triangleCount; ++t) {
@@ -37,7 +35,7 @@ namespace trichi {
       for (size_t v = 0; v < 3; ++v) {
         const uint32_t vertexIndex = buffers.vertices[cluster.vertexOffset + buffers.triangles[triangleOffset + v]];
         indicesPerCluster[indexOffsetPerCluster[i] + indexOffset + v] = vertexIndex;
-        uniqueVertices.insert(vertexIndex);
+        maxVertexIndex = std::max(vertexIndex, maxVertexIndex);
       }
     }
   };
@@ -50,7 +48,7 @@ namespace trichi {
           indicesPerCluster.size(),
           indexCountPerCluster.data(),
           clusterIndices.size(),
-          uniqueVertices.size(),
+          maxVertexIndex + 1, // meshopt needs a vertex count that is valid for the given indices
           maxClustersPerGroup)
       );
 }
