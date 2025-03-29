@@ -12,7 +12,7 @@ If you want to help change that, you are more than welcome to submit a PR :)**
 ### CPM
 
 ```cmake
-CPMAddPackage("gh:JolifantoBambla/trichi#v0.1.0")
+CPMAddPackage("gh:JolifantoBambla/trichi#main")
 
 target_link_libraries(${YOUR_TARGET} trichi)
 ```
@@ -20,6 +20,7 @@ target_link_libraries(${YOUR_TARGET} trichi)
 ### CMake options
 
  - `TRICHI_PARALLEL`: build multithreaded version
+ - `TRICHI_METIS`: use METIS for grouping clusters instead of `meshoptimizer`
 
 ## Usage
 
@@ -44,9 +45,9 @@ const auto clusterHierarchy = trichi::buildClusterHierarchy(
 
 ## Dependencies
 
- - [meshoptimizer](https://github.com/zeux/meshoptimizer): used for triangle clustering and mesh simplification, MIT licensed
- - [METIS](https://github.com/KarypisLab/METIS): used for grouping neighboring triangle clusters, Apache 2.0 licensed
- - [BS::thread_pool](https://github.com/bshoshany/thread-pool) (if built with the `TRICHI_PARALLEL` option): used for parallelizing some dag construction steps, MIT licensed
+ - [meshoptimizer](https://github.com/zeux/meshoptimizer): used for triangle clustering, cluster grouping, and mesh simplification, MIT licensed
+ - [BS::thread_pool (optional)](https://github.com/bshoshany/thread-pool) (if built with the `TRICHI_PARALLEL` option): used for parallelizing some dag construction steps, MIT licensed
+ - [METIS (optional)](https://github.com/KarypisLab/METIS) (if built with `TRICHI_METIS` option): can be used for grouping neighboring triangle clusters instead of `meshoptimizer` (there isn't much reason to: it's slower and increases binary size), Apache 2.0 licensed
 
 ## Caveats
 
@@ -62,6 +63,7 @@ The algorithm builds on the assumption that the input mesh is contiguous. It is 
  - [THREE Nanite](https://github.com/AIFanatic/three-nanite): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in Three.js.
  - [Nanite WebGPU](https://github.com/Scthe/nanite-webgpu): A proof of concept for constructing & rendering Nanite-like cluster hierarchies in WebGPU. Includes software rasterization for very small triangles.
  - [meshoptimizer](https://github.com/zeux/meshoptimizer): A wild nanite demo appeared! Looks like Zeux is working on a new addition to the meshoptimizer library <3
+ - [nv_cluster_lod_builder](https://github.com/nvpro-samples/nv_cluster_lod_builder): NVIDIA released an Apache 2.0 licensed library for triangle cluster hierarchy generation!
 
 ## Further Reading
 
@@ -72,3 +74,4 @@ The algorithm builds on the assumption that the input mesh is contiguous. It is 
  - [Benthin and Peters, "Real-Time Ray Tracing of Micro-Poly Geometry with Hierarchical Level of Detail"](https://onlinelibrary.wiley.com/doi/10.1111/cgf.14868)
  - [Cao, "Seamless Rendering on Mobile: The Magic of Adaptive LOD Pipeline"](https://advances.realtimerendering.com/s2024/content/Cao-NanoMesh/AdavanceRealtimeRendering_NanoMesh0810.pdf)
  - [jglrxavpok, "Recreating Nanite"](https://jglrxavpok.github.io/2023/11/12/recreating-nanite-the-plan.html)
+ - [RTX Mega Geometry](https://developer.nvidia.com/blog/nvidia-rtx-mega-geometry-now-available-with-new-vulkan-samples/)
