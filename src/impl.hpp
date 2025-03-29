@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Lukas Herzberger
+* Copyright (c) 2024-2025 Lukas Herzberger
 * SPDX-License-Identifier: MIT
 */
 
