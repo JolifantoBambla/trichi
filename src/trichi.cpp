@@ -23,9 +23,11 @@ namespace trichi {
     const size_t vertexCount,
     const size_t vertexStride,
     const size_t maxVertices,
+    const size_t minTriangles,
     const size_t maxTriangles,
-    const float coneWeight) {
-  const size_t maxClusters = meshopt_buildMeshletsBound(indices.size(), maxVertices, maxTriangles);
+    const float coneWeight,
+    const float splitFactor) {
+  const size_t maxClusters = meshopt_buildMeshletsBound(indices.size(), maxVertices, minTriangles);
   Buffers buffers = {
       .clusters = {},
       .vertices = std::vector<unsigned int>(maxClusters * maxVertices),
@@ -35,7 +37,7 @@ namespace trichi {
   std::vector<meshopt_Meshlet> clusters{maxClusters};
 
   // building the meshlets for lod 0 is the most time-consuming operation, guess there is not much more to do when it comes to performance optimization
-  clusters.resize(meshopt_buildMeshlets(
+  clusters.resize(meshopt_buildMeshletsFlex(
       clusters.data(),
       buffers.vertices.data(),
       buffers.triangles.data(),
@@ -45,8 +47,10 @@ namespace trichi {
       vertexCount,
       vertexStride,
       maxVertices,
+      minTriangles,
       maxTriangles,
-      coneWeight));
+      coneWeight,
+      splitFactor));
 
   // perf cost of this transform is insignificant
   std::transform(std::make_move_iterator(clusters.cbegin()), std::make_move_iterator(clusters.cend()), std::back_inserter(buffers.clusters), [](const auto& meshlet) {
@@ -65,16 +69,18 @@ namespace trichi {
   return std::move(buffers);
 }
 
-[[nodiscard]] Buffers buildParentCeshlets(
+[[nodiscard]] Buffers buildParentClusters(
     const std::vector<uint32_t>& indices,
     const std::vector<float>& vertices,
     const size_t vertexCount,
     const size_t vertexStride,
     const size_t maxVertices,
+    const size_t minTriangles,
     const size_t maxTriangles,
     const float coneWeight,
+    const float splitFactor,
     const size_t maxClusters) {
-  auto buffers = buildClusters(indices, vertices, vertexCount, vertexStride, maxVertices, maxTriangles, coneWeight);
+  auto buffers = buildClusters(indices, vertices, vertexCount, vertexStride, maxVertices, minTriangles, maxTriangles, coneWeight, splitFactor);
 
   if (buffers.clusters.size() <= maxClusters) {
     for (size_t i = 0; i < buffers.clusters.size(); ++i) {
@@ -144,6 +150,38 @@ mergeGroup(const std::vector<ClusterIndex>& clusterIndices, const Buffers& buffe
   return std::make_pair(std::move(simplifiedIndices), simplificationError);
 }
 
+/**
+ * merge error bounds to conservatively bound all child groups
+ * the error bounds don't have to be a tight sphere around the group but must ensure monotonicity of the change in error from the root to its leaves
+ * see Federico Ponchio, "Multiresolution structures for interactive visualization of very large 3D datasets", Section 4.2.3
+ */
+[[nodiscard]] ErrorBounds mergeErrorBounds(const std::vector<size_t>& group, const float simplificationError, const std::vector<ClusterIndex>& clusterPool, const std::vector<NodeErrorBounds>& nodeErrorBounds) {
+  ErrorBounds groupErrorBounds{
+      .error = simplificationError,
+  };
+
+  std::vector<ErrorBounds> groupBounds(group.size());
+  for (const size_t groupClusterIndex : group) {
+    const auto& childError = nodeErrorBounds[clusterPool[groupClusterIndex].index].clusterError;
+    groupBounds.push_back(childError);
+    groupErrorBounds.error = std::max(groupErrorBounds.error, childError.error);
+  }
+
+  const auto mergedErrorBounds = meshopt_computeSphereBounds(
+      &groupBounds[0].center[0],
+      groupBounds.size(),
+      sizeof(ErrorBounds),
+      &groupBounds[0].radius,
+      sizeof(ErrorBounds));
+
+  groupErrorBounds.center[0] = mergedErrorBounds.center[0];
+  groupErrorBounds.center[1] = mergedErrorBounds.center[1];
+  groupErrorBounds.center[2] = mergedErrorBounds.center[2];
+  groupErrorBounds.radius = mergedErrorBounds.radius;
+
+  return std::move(groupErrorBounds);
+}
+
 ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, const std::vector<float>& vertices, const size_t vertexStride, const Params& params) {
   // todo: remove
   const auto startTime = std::chrono::high_resolution_clock::now();
@@ -154,8 +192,10 @@ ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, con
   const size_t vertexCount = (vertices.size() * sizeof(float)) / vertexStride;
 
   const size_t maxVertices = params.maxVerticesPerCluster;
+  const size_t minTriangles = params.splitClusterThreshold;
   const size_t maxTriangles = params.maxTrianglesPerCluster;
   const float coneWeight = params.clusterConeWeight;
+  const float splitFactor = params.clusterSplitFactor;
   const size_t maxNumClustersPerGroup = params.targetClustersPerGroup;
   const size_t simplifyTargetIndexCount = std::min(maxVertices, maxTriangles) * 3 * 2;
   const size_t maxLodCount = params.maxHierarchyDepth;
@@ -164,7 +204,7 @@ ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, con
 
   std::vector<size_t> lodOffsets = {0};
 
-  Buffers buffers = buildClusters(indices, vertices, vertexCount, vertexStride, maxVertices, maxTriangles, coneWeight);
+  Buffers buffers = buildClusters(indices, vertices, vertexCount, vertexStride, maxVertices, minTriangles, maxTriangles, coneWeight, splitFactor);
   std::vector<NodeErrorBounds> nodeErrorBounds(buffers.clusters.size());
   std::vector<ClusterBounds> nodeClusterBounds(buffers.clusters.size());
   std::vector<Node> nodes(buffers.clusters.size());
@@ -266,14 +306,16 @@ ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, con
 
         simplified = simplifiedIndices.size() < groupIndices.size();
         if (simplified) {
-          auto groupClusters = std::move(buildParentCeshlets(
+          auto groupClusters = std::move(buildParentClusters(
               simplifiedIndices,
               vertices,
               vertexCount,
               vertexStride,
               maxVertices,
+              minTriangles,
               maxTriangles,
               coneWeight,
+              splitFactor,
               group.size() - 1));
 
           simplified = groupClusters.clusters.size() < group.size();
@@ -284,37 +326,7 @@ ClusterHierarchy buildClusterHierarchy(const std::vector<uint32_t>& indices, con
             numNewTriangles += groupClusters.triangles.size();
             numNextClusters += groupClusters.clusters.size();
 
-            // merge error bounds to conservatively bound all child groups
-            // the error bounds don't have to be a tight sphere around the group but must ensure monotonicity of the change in error from the root to its leaves
-            // see Federico Ponchio, "Multiresolution structures for interactive visualization of very large 3D datasets", Section 4.2.3
-            //
-            // we use the method from meshoptimizer's nanite demo
-            // https://github.com/zeux/meshoptimizer/blob/bfbbaddf38d6fc2311ba66762c6f7656a7c8dd79/demo/nanite.cpp#L67
-            float groupBoundsCenter[3] = {0.0, 0.0, 0.0};
-            float groupBoundsCenterWeight = 0.0;
-            for (const size_t groupClusterIndex : group) {
-              const auto& childError = nodeErrorBounds[clusterPool[groupClusterIndex].index].clusterError;
-              groupBoundsCenter[0] += childError.center[0] * childError.radius;
-              groupBoundsCenter[1] += childError.center[1] * childError.radius;
-              groupBoundsCenter[2] += childError.center[2] * childError.radius;
-              groupBoundsCenterWeight += childError.radius;
-            }
-            ErrorBounds groupErrorBounds{};
-            groupErrorBounds.center[0] = groupBoundsCenter[0] / groupBoundsCenterWeight;
-            groupErrorBounds.center[1] = groupBoundsCenter[1] / groupBoundsCenterWeight;
-            groupErrorBounds.center[2] = groupBoundsCenter[2] / groupBoundsCenterWeight;
-            groupErrorBounds.radius = 0.0;
-            groupErrorBounds.error = simplificationError;
-            for (const size_t groupClusterIndex : group) {
-              const auto& childError = nodeErrorBounds[clusterPool[groupClusterIndex].index].clusterError;
-              float dist[3] = {
-                  groupErrorBounds.center[0] - childError.center[0],
-                  groupErrorBounds.center[1] - childError.center[1],
-                  groupErrorBounds.center[2] - childError.center[2],
-              };
-              groupErrorBounds.radius = std::max(groupErrorBounds.radius, childError.radius + std::sqrt(dist[0] * dist[0] + dist[1] * dist[1] + dist[2] * dist[2]));
-              groupErrorBounds.error = std::max(groupErrorBounds.error, childError.error);
-            }
+            ErrorBounds groupErrorBounds = mergeErrorBounds(group, simplificationError, clusterPool, nodeErrorBounds);
 
             std::vector<size_t> childNodeIndices{};
             childNodeIndices.reserve(group.size());

@@ -76,6 +76,8 @@ int main(int argc, char* argv[]) {
 
     trichi::Params params{};
     params.threadPoolSize = std::thread::hardware_concurrency();
+    params.targetClustersPerGroup = 8;
+    params.clusterSplitFactor = 2.0;
     params.clusterConeWeight = 0.0;
     const auto dag = trichi::buildClusterHierarchy(indices, vertices, vertexStride, params);
 
