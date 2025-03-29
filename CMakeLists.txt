@@ -15,7 +15,7 @@ option(TRICHI_BUILD_CLI "Build cli (only for native builds)" ON)
 # add dependencies
 include(cmake/CPM.cmake)
 
-CPMAddPackage("gh:zeux/meshoptimizer#v0.21")
+CPMAddPackage("gh:zeux/meshoptimizer#v0.23")
 include(cmake/metis.cmake)
 include(cmake/thread-pool.cmake)
 
