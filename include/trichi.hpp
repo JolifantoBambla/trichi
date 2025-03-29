@@ -26,9 +26,23 @@ struct Params {
 
   /**
    * A weighting factor for the importance of cluster normal cones used when building the clusters.
-   * In range [0..1].
+   * Set to -1.0 to disable it in favor of axis-aligned cluster generation.
+   * Otherwise, in range [0..1].
    */
   float clusterConeWeight = 0.0;
+
+  /**
+   * A threshold to determine if a cluster should be split into smaller ones.
+   * If a cluster has more than `splitClusterThreshold` triangles and has large bounds the cluster may be split.
+   * Only has an effect if `splitFactor` is non-zero.
+   */
+  size_t splitClusterThreshold = 64;
+
+  /**
+   * A factor to determine if a cluster with large bounds should be split.
+   * If this is non-zero, large clusters with a triangle count exceeding `splitClusterThreshold` are split.
+   */
+  float clusterSplitFactor = 0.0;
 
   /**
    * The target number of clusters per group.

@@ -37,6 +37,8 @@ const auto clusterHierarchy = trichi::buildClusterHierarchy(
     .maxVerticesPerCluster: 64,
     .maxTrianglesPerCluster: 128,
     .clusterConeWeight: 0.0,
+    .splitClusterThreshold: 64,
+    .clusterSplitFactor = 0.0;
     .targetClustersPerGroup: 4,
     .maxHierarchyDepth: 25,
     .threadPoolSize: std::thread::hardware_concurrency(),
