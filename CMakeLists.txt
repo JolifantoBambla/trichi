@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD 20)
 option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
 option(TRICHI_BUILD_JS_MODULE "Build the library as a JavaScript module (currently only valid when built with emscripten)" OFF)
 option(TRICHI_BUILD_CLI "Build cli (only for native builds)" ON)
-option(TRICHI_METIS "Use METIS for graph partitioning. If OFF, meshoptimizer is used." ON)
+option(TRICHI_METIS "Use METIS for graph partitioning. If OFF, meshoptimizer is used." OFF)
 
 # add dependencies
 include(cmake/CPM.cmake)
