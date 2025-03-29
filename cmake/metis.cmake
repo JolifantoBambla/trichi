@@ -76,4 +76,4 @@ target_link_libraries(libmetis
         PRIVATE $<$<BOOL:${UNIX}>:m>
 )
 
-add_subdirectory("${METIS_SOURCE_DIR}/libmetis" "${CMAKE_CURRENT_BINARY_DIR}")
+add_subdirectory("${METIS_SOURCE_DIR}/libmetis" "${CMAKE_CURRENT_BINARY_DIR}/metis-build")
