@@ -32,6 +32,15 @@ void extractBoundary(const ClusterIndex& clusterIndex, const Buffers& buffers, s
 
 [[nodiscard]] std::vector<std::vector<uint64_t>> extractBoundaries(const std::vector<ClusterIndex>& clusterIndices, const Buffers& buffers, LoopRunner& loopRunner);
 
+template <typename Index>
+[[nodiscard]] std::vector<std::vector<size_t>> resolveGroups(const std::vector<Index>& partition, const size_t numGroups) {
+  auto groups = std::vector<std::vector<size_t>>(numGroups);
+  for (size_t i = 0; i < partition.size(); ++i) {
+    groups[partition[i]].push_back(i);
+  }
+  return std::move(groups);
+}
+
 [[nodiscard]] std::vector<std::vector<size_t>> groupClusters(
     const std::vector<ClusterIndex>& clusterIndices,
     const Buffers& buffers,

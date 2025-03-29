@@ -11,28 +11,36 @@ set(CMAKE_CXX_STANDARD 20)
 option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
 option(TRICHI_BUILD_JS_MODULE "Build the library as a JavaScript module (currently only valid when built with emscripten)" OFF)
 option(TRICHI_BUILD_CLI "Build cli (only for native builds)" ON)
+option(TRICHI_METIS "Use METIS for graph partitioning. If OFF, meshoptimizer is used." ON)
 
 # add dependencies
 include(cmake/CPM.cmake)
 
 CPMAddPackage("gh:zeux/meshoptimizer#v0.23")
-include(cmake/metis.cmake)
+if (TRICHI_METIS)
+    include(cmake/metis.cmake)
+endif ()
 include(cmake/thread-pool.cmake)
 
 # lib
-add_library(trichi
-        src/trichi.cpp
-        src/common.cpp
-        src/metis.cpp)
-target_include_directories(trichi PUBLIC
-        include)
-target_include_directories(trichi PRIVATE
-        src
+set(TRICHI_SOURCES
+    src/trichi.cpp
+    src/common.cpp
 )
-target_link_libraries(trichi
-        meshoptimizer
-        libmetis
-)
+if (TRICHI_METIS)
+    list(APPEND TRICHI_SOURCES src/metis.cpp)
+else ()
+    list(APPEND TRICHI_SOURCES src/meshopt.cpp)
+endif ()
+
+add_library(trichi ${TRICHI_SOURCES})
+target_include_directories(trichi PUBLIC include)
+target_include_directories(trichi PRIVATE src)
+
+target_link_libraries(trichi meshoptimizer)
+if (TRICHI_METIS)
+    target_link_libraries(trichi libmetis)
+endif ()
 
 if (TRICHI_PARALLEL)
     target_link_libraries(trichi BS_thread_pool)
