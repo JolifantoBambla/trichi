@@ -12,7 +12,6 @@
 #include <valarray>
 
 #include "meshoptimizer.h"
-#include "metis.h"
 
 #include "impl.hpp"
 #include "trichi.hpp"

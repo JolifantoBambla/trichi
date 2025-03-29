@@ -5,7 +5,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 
 #include "metis.h"
 
@@ -79,14 +78,6 @@ struct Graph {
       .adjwght = std::move(adjwght),
       .isContiguous = isContiguous,
   };
-}
-
-[[nodiscard]] std::vector<std::vector<size_t>> resolveGroups(const std::vector<idx_t>& partition, const size_t numGroups) {
-  auto groups = std::vector<std::vector<size_t>>(numGroups);
-  for (size_t i = 0; i < partition.size(); ++i) {
-    groups[partition[i]].push_back(i);
-  }
-  return std::move(groups);
 }
 
 [[nodiscard]] std::array<idx_t, METIS_NOPTIONS> createPartitionOptions(const bool isContiguous = true) {
