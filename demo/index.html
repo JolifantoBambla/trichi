@@ -187,11 +187,19 @@
                     const vertexSizeBytes = 8;
                     const decodedVertexData = new Uint8Array(vertexSizeBytes * numVertices);
                     decoder.decodeVertexBuffer(decodedVertexData, numVertices, vertexSizeBytes, new Uint8Array(v));
+
+                    // todo: should just upload U8s here and fix the indexing in the shader
+                    const trianglesBytes = new Uint8Array(ct);
+                    const triangles = new Uint32Array(trianglesBytes.length);
+                    for (let i = 0; i < trianglesBytes.length; ++i) {
+                        triangles[i] = trianglesBytes[i];
+                    }
+
                     return [
                         decodedVertexData,
                         new Uint32Array(c),
                         new Uint32Array(cv),
-                        new Uint32Array(ct),
+                        triangles,
                         new Float32Array(ne),
                         new Float32Array(cb),
                     ];
