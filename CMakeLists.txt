@@ -9,6 +9,7 @@ project(trichi
 set(CMAKE_CXX_STANDARD 20)
 
 option(TRICHI_PARALLEL "Build the library with parallelization enabled." ON)
+option(TRICHI_BUILD_SHARED_LIB "Build Tri Chi as a shared library." OFF)
 option(TRICHI_BUILD_JS_MODULE "Build the library as a JavaScript module (currently only valid when built with emscripten)" OFF)
 option(TRICHI_BUILD_CLI "Build cli (only for native builds)" ON)
 option(TRICHI_METIS "Use METIS for graph partitioning. If OFF, meshoptimizer is used." OFF)
@@ -33,17 +34,21 @@ else ()
     list(APPEND TRICHI_SOURCES src/meshopt.cpp)
 endif ()
 
-add_library(trichi ${TRICHI_SOURCES})
+if (TRICHI_BUILD_SHARED_LIB)
+    add_library(trichi SHARED ${TRICHI_SOURCES})
+else ()
+    add_library(trichi STATIC ${TRICHI_SOURCES})
+endif ()
 target_include_directories(trichi PUBLIC include)
 target_include_directories(trichi PRIVATE src)
 
-target_link_libraries(trichi meshoptimizer)
+target_link_libraries(trichi PRIVATE meshoptimizer)
 if (TRICHI_METIS)
-    target_link_libraries(trichi libmetis)
+    target_link_libraries(trichi PRIVATE libmetis)
 endif ()
 
 if (TRICHI_PARALLEL)
-    target_link_libraries(trichi BS_thread_pool)
+    target_link_libraries(trichi PRIVATE BS_thread_pool)
     target_compile_definitions(trichi PRIVATE TRICHI_PARALLEL)
 endif (TRICHI_PARALLEL)
 
@@ -92,6 +97,7 @@ else (EMSCRIPTEN)
         target_link_libraries(dump_trichi_js PUBLIC
                 trichi
                 assimp
-                argparse::argparse)
+                argparse::argparse
+                meshoptimizer)
     endif (TRICHI_BUILD_CLI)
 endif (EMSCRIPTEN)
