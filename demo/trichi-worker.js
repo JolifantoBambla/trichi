@@ -28,23 +28,10 @@ async function processModel(file, onModelProcessed, onError) {
             trichiParams,
         );
 
-        const aabb = {
-            min: [mesh.vertices[0], mesh.vertices[1], mesh.vertices[2]],
-            max: [mesh.vertices[0], mesh.vertices[1], mesh.vertices[2]],
-        };
-        for (let i = 6; i < mesh.vertices.length; i += 6) {
-            aabb.min[0] = Math.min(aabb.min[0], mesh.vertices[i]);
-            aabb.min[1] = Math.min(aabb.min[1], mesh.vertices[i + 1]);
-            aabb.min[2] = Math.min(aabb.min[2], mesh.vertices[i + 2]);
-            aabb.max[0] = Math.max(aabb.max[0], mesh.vertices[i]);
-            aabb.max[1] = Math.max(aabb.max[1], mesh.vertices[i + 1]);
-            aabb.max[2] = Math.max(aabb.max[2], mesh.vertices[i + 2]);
-        }
-
         const diag = [
-            aabb.max[0] - aabb.min[0],
-            aabb.max[1] - aabb.min[1],
-            aabb.max[2] - aabb.min[2],
+            mesh.aabbMax[0] - mesh.aabbMin[0],
+            mesh.aabbMax[1] - mesh.aabbMin[1],
+            mesh.aabbMax[2] - mesh.aabbMin[2],
         ];
         const scalingFactor = 10.0 / Math.max(...diag);
         const transform = mat4n.multiply(

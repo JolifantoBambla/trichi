@@ -1,5 +1,5 @@
 export const renderClusterWgsl = `
-override VERTEX_STRIDE_FLOATS: u32 = 6;
+override VERTEX_STRIDE_FLOATS: u32 = 2;
 
 struct Camera {
     view: mat4x4<f32>,
@@ -40,24 +40,28 @@ struct Vertex {
 @group(1) @binding(1) var<storage> meshlets: array<Meshlet>;
 @group(1) @binding(2) var<storage> vertices: array<u32>;
 @group(1) @binding(3) var<storage> triangles: array<u32>;
-@group(1) @binding(4) var<storage> vertex_data: array<f32>;
+@group(1) @binding(4) var<storage> vertex_data: array<u32>;
 
 // visible clusters
 @group(2) @binding(0) var<storage> cluster_instances: array<ClusterInstance>;
 
 fn get_vertex(meshlet: Meshlet, vertex_index: u32) -> Vertex {
     let index = vertices[meshlet.vertex_offset + triangles[meshlet.triangle_offset + vertex_index]] * VERTEX_STRIDE_FLOATS;
+    
+    let xy = unpack2x16float(vertex_data[index]);
+    let z = unpack2x16float(vertex_data[index + 1]).x;
+    
+    // octahedron encoded normal
+    let n_uv = vec2<f32>(unpack4xI8(vertex_data[index + 1]).zw) / 127.0f;
+    let nz = 1.0 - abs(n_uv.x) - abs(n_uv.y);
+    var normal = vec3<f32>(n_uv, nz);
+    if nz < 0.0f {
+        normal = vec3<f32>((1.0f - abs(n_uv.yx)) * sign(n_uv.xy), nz);
+    }
+    
     return Vertex(
-        vec3(
-            vertex_data[index],
-            vertex_data[index + 1],
-            vertex_data[index + 2],
-        ),
-        vec3(
-            vertex_data[index + 3],
-            vertex_data[index + 4],
-            vertex_data[index + 5],
-        ),
+        vec3<f32>(xy, z),
+        normalize(normal),
     );
 }
 

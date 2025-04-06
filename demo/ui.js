@@ -37,10 +37,8 @@ browser. Make sure the model is rather small &
 contiguous as faceted models are currently not
 supported.
 Also, processing a model in the browser is
-much slower than the native version. E.g.,
-processing the 4.3 million triangle model
-takes 7.5 seconds on native vs. 15 minutes in
-the browser.
+a bit slow because model parsing and normal
+generation with assimp takes some time.
 Keep that in mind when choosing a model to try
 it out - models like Lucy, Happy Buddha, etc.
 are good choices.
@@ -51,7 +49,7 @@ Have fun :)
         label: null,
         readonly: true,
         multiline: true,
-        rows: 32,
+        rows: 30,
     });
 
     const renderSettingsFolder = pane.addFolder({

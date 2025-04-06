@@ -6,9 +6,10 @@
 #include "assimp/Importer.hpp"
 #include "assimp/postprocess.h"
 #include "assimp/scene.h"
+#include "meshoptimizer.h"
 #include "trichi.hpp"
 
-[[nodiscard]] emscripten::val convertToJsObjec(const trichi::ClusterHierarchy& hierarchy, const bool trianglesAsU32 = false) {
+[[nodiscard]] emscripten::val convertToJsObject(const trichi::ClusterHierarchy& hierarchy, const bool trianglesAsU32 = false) {
   auto errors = emscripten::val::global("Float32Array").new_(hierarchy.errors.size() * 10);
   for (size_t i = 0; i < hierarchy.errors.size(); ++i) {
     errors.set(i * 10 + 0, hierarchy.errors[i].parentError.center[0]);
@@ -62,7 +63,7 @@
 }
 
 [[nodiscard]] emscripten::val buildTriangleClusterHierarchy(const emscripten::val& indicesJs, const emscripten::val& verticesJs, const size_t vertexStride, const trichi::Params& params) {
-  auto hierarchy = convertToJsObjec(
+  auto hierarchy = convertToJsObject(
       trichi::buildClusterHierarchy(
         emscripten::convertJSArrayToNumberVector<uint32_t>(indicesJs),
         emscripten::convertJSArrayToNumberVector<float>(verticesJs),
@@ -73,6 +74,38 @@
   hierarchy.set("vertices", verticesJs);
   hierarchy.set("vertexStrideFloats", vertexStride / sizeof(float));
   return hierarchy;
+}
+
+[[nodiscard]] std::vector<uint8_t> toQuantizedVertexBytes(const std::vector<float>& vertices) {
+  const auto vertexCount = vertices.size() / 6;
+
+  std::vector<uint8_t> bytes{};
+  bytes.reserve(vertexCount * (sizeof(uint16_t) * 3 + sizeof(int8_t) * 2));
+
+  for (size_t i = 0; i < vertexCount; ++i) {
+    const auto v = i * 6;
+
+    for (size_t c = 0; c < 3; ++c) {
+      const uint16_t comp = meshopt_quantizeHalf(vertices[v + c]);
+      bytes.push_back(static_cast<uint8_t>(comp & 0xff));
+      bytes.push_back(static_cast<uint8_t>((comp >> 8) & 0xff));
+    }
+
+    const struct {
+      float x, y, z;
+    } n = {vertices[v + 3], vertices[v + 4], vertices[v + 5],};
+    float nsum = fabsf(n.x) + fabsf(n.y) + fabsf(n.z);
+    float nx = n.x / nsum;
+    float ny = n.y / nsum;
+
+    int8_t nu = static_cast<int8_t>(meshopt_quantizeSnorm(n.z >= 0.0f ? nx : (1.0f - fabsf(ny)) * (nx >= 0.0f ? 1.0f : -1.0f), 8));
+    int8_t nv = static_cast<int8_t>(meshopt_quantizeSnorm(n.z >= 0.0f ? ny : (1.0f - fabsf(nx)) * (ny >= 0.0f ? 1.0f : -1.0f), 8));
+
+    bytes.push_back(static_cast<uint8_t>(nu));
+    bytes.push_back(static_cast<uint8_t>(nv));
+  }
+
+  return std::move(bytes);
 }
 
 [[nodiscard]] emscripten::val buildTriangleClusterHierarchyFromFileBlob(const std::string& fileName, const emscripten::val& bytesJs, const trichi::Params& params) {
@@ -115,7 +148,7 @@
   }
   std::cout << "Loaded model from memory\n";
 
-  auto hierarchy = convertToJsObjec(trichi::buildClusterHierarchy(indices, vertices, vertexStride, params), true);
+  auto hierarchy = convertToJsObject(trichi::buildClusterHierarchy(indices, vertices, vertexStride, params), true);
 
   std::cout << "Generated triangle cluster hierarchy\n";
 
@@ -124,14 +157,32 @@
     indicesJs.set(i, indices[i]);
   }
 
-  auto verticesJs = emscripten::val::global("Float32Array").new_(vertices.size() * 4);
-  for (size_t i = 0; i < vertices.size(); ++i) {
-    verticesJs.set(i, vertices[i]);
+  const auto quantizedVertices = toQuantizedVertexBytes(vertices);
+  auto verticesJs = emscripten::val::global("Uint8Array").new_(quantizedVertices.size());
+  for (size_t i = 0; i < quantizedVertices.size(); ++i) {
+    verticesJs.set(i, quantizedVertices[i]);
+  }
+
+  float aabbMin[3] = {vertices[0], vertices[1], vertices[2]};
+  float aabbMax[3] = {vertices[0], vertices[1], vertices[2]};
+  for (size_t i = 6; i < vertices.size(); i += 6) {
+    for (size_t c = 0; c < 3; ++c) {
+      aabbMin[c] = std::min(aabbMin[c], vertices[i + c]);
+      aabbMax[c] = std::max(aabbMax[c], vertices[i + c]);
+    }
+  }
+  auto aabbMinJs = emscripten::val::global("Float32Array").new_(3);
+  auto aabbMaxJs = emscripten::val::global("Float32Array").new_(3);
+  for (size_t c = 0; c < 3; ++c) {
+    aabbMinJs.set(c, aabbMin[c]);
+    aabbMaxJs.set(c, aabbMax[c]);
   }
 
   hierarchy.set("indices", indicesJs);
   hierarchy.set("vertices", verticesJs);
-  hierarchy.set("vertexStrideFloats", floatsPerVertex);
+  hierarchy.set("aabbMin", aabbMinJs);
+  hierarchy.set("aabbMax", aabbMaxJs);
+  hierarchy.set("vertexStrideFloats", 2);
 
   std::cout << "Processing done\n";
 
