@@ -68,11 +68,13 @@ if (EMSCRIPTEN)
         target_compile_options(meshoptimizer PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
         target_link_options(meshoptimizer PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_LINK_OPTIONS})
 
-        target_compile_options(libmetis PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
-        target_link_options(libmetis PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_LINK_OPTIONS})
+        if (TRICHI_METIS)
+            target_compile_options(libmetis PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
+            target_link_options(libmetis PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_LINK_OPTIONS})
 
-        target_compile_options(GKlib PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
-        target_link_options(GKlib PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_LINK_OPTIONS})
+            target_compile_options(GKlib PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
+            target_link_options(GKlib PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_LINK_OPTIONS})
+        endif(TRICHI_METIS)
     endif (TRICHI_PARALLEL)
 
     if (TRICHI_BUILD_JS_MODULE)

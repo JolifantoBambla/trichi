@@ -11,13 +11,13 @@ sudo apt-get install emscripten
 ```bash
 # with multithreading
 mkdir -p build-par && cd build-par
-cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_BUILD_JS_MODULE=ON -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_BUILD_JS_MODULE=ON -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
 cmake --build . --target trichi-wasm
 cd ..
 
 # without multithreading
 mkdir -p build-seq && cd build-seq
-cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_PARALLEL=OFF -DTRICHI_BUILD_JS_MODULE=ON -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/usr/share/emscripten/cmake/Modules/Platform/Emscripten.cmake -DTRICHI_PARALLEL=OFF -DTRICHI_BUILD_JS_MODULE=ON -DASSIMP_BUILD_ZLIB=ON -G "Ninja" ..
 cmake --build . --target trichi-wasm
 cd ..
 

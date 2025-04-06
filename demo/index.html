@@ -15,11 +15,15 @@
 <script type="module">
     import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
 
+    import {MeshoptDecoder} from './meshopt/meshopt_decoder.module.js';
+
     import {mat4n} from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.min.js';
     import {FPSCameraController} from './fps-camera.js';
     import {makeUi} from './ui.js';
     import {webgpuNotSupported, showStatusMessage} from './util.js';
     import {makeClusterRenderer} from './cluster-renderer.js';
+
+    console.log(MeshoptDecoder)
 
     const urlParams = new URLSearchParams(window.location.search);
     const useTimestampQuery = urlParams.has('timestamp_query');
@@ -150,8 +154,59 @@
             isProcessingModel = true;
             try {
                 dialogBox = showStatusMessage('Loading 3D model ...');
-                const m = await import('https://jolifantobambla.github.io/trichi/demo-mesh.js');
-                clusterRenderer.newMesh(m.mesh);
+
+                function tryFetch(url) {
+                    return new Promise((res, rej) => {
+                        const req = new XMLHttpRequest();
+                        req.onload = _ => res(req.response);
+                        req.onerror = _ => rej(req);
+                        req.open('GET', url);
+                        req.responseType = "arraybuffer";
+                        req.send(null);
+                    });
+                }
+
+                console.time('init demo mesh');
+                const [
+                    vertices,
+                    clusters,
+                    clusterVertices,
+                    clusterTriangles,
+                    errors,
+                    bounds,
+                ] = await Promise.all([
+                    tryFetch('./demo-mesh/vertex.bin'),
+                    tryFetch('./demo-mesh/clusters.bin'),
+                    tryFetch('./demo-mesh/cluster_vertices.bin'),
+                    tryFetch('./demo-mesh/cluster_triangles.bin'),
+                    tryFetch('./demo-mesh/node_errors.bin'),
+                    tryFetch('./demo-mesh/cluster_bounds.bin'),
+                    MeshoptDecoder,
+                ]).then(([v, c, cv, ct, ne, cb, decoder]) => {
+                    const numVertices = 2188099;
+                    const vertexSizeBytes = 8;
+                    const decodedVertexData = new Uint8Array(vertexSizeBytes * numVertices);
+                    decoder.decodeVertexBuffer(decodedVertexData, numVertices, vertexSizeBytes, new Uint8Array(v));
+                    return [
+                        decodedVertexData,
+                        new Uint32Array(c),
+                        new Uint32Array(cv),
+                        new Uint32Array(ct),
+                        new Float32Array(ne),
+                        new Float32Array(cb),
+                    ];
+                });
+                const mesh = {
+                    vertices,
+                    clusters,
+                    clusterVertices,
+                    clusterTriangles,
+                    errors,
+                    bounds,
+                    numMeshlets: clusters.length / 4,
+                };
+                clusterRenderer.newMesh(mesh);
+                console.timeEnd('init demo mesh');
                 hasMesh = true;
             } catch (e) {
                 console.log(e);

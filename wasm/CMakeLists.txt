@@ -1,4 +1,5 @@
 CPMAddPackage("gh:assimp/assimp#v5.4.2")
+CPMAddPackage("gh:zeux/meshoptimizer#v0.23")
 
 if (TRICHI_PARALLEL)
     target_compile_options(assimp PUBLIC ${TRICHI_EMSCRIPTEN_PARALLEL_COMPILE_OPTIONS})
@@ -6,13 +7,13 @@ if (TRICHI_PARALLEL)
 endif (TRICHI_PARALLEL)
 
 add_executable(trichi-wasm trichi-wasm.cpp)
-target_link_libraries(trichi-wasm trichi assimp)
+target_link_libraries(trichi-wasm trichi assimp meshoptimizer)
 target_compile_options(trichi-wasm PUBLIC
-        -Os
+        -O3
 )
 target_link_options(trichi-wasm PUBLIC
         -lembind
-        -Os
+        -O3
         -sEXPORT_ES6=1
         -sMODULARIZE=1
         -sEXPORT_NAME="TrichiJs"

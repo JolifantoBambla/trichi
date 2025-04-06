@@ -12,7 +12,7 @@ function makeVertexBuffer(device, mesh) {
         usage: GPUBufferUsage.STORAGE,
         mappedAtCreation: true,
     });
-    (new Float32Array(vertexBuffer.getMappedRange())).set(mesh.vertices);
+    (new Uint8Array(vertexBuffer.getMappedRange())).set(mesh.vertices);
     vertexBuffer.unmap();
     return vertexBuffer;
 }
@@ -104,7 +104,7 @@ function makeRenderClusterPipeline(device, colorFormat, depthFormat, reverseZ) {
             module: meshletModule,
             buffers: [],
             constants: {
-                VERTEX_STRIDE_FLOATS: 6,
+                VERTEX_STRIDE_FLOATS: 2,
             },
         },
         primitive: {
